@@ -194,6 +194,7 @@ YYYY-MM-DD | 作者/分支 | 变更摘要 | 已执行的验证 | 已知问题
 
 当前记录：
 
+- 2026-07-15 | `feature/fc-bridge` | 在真实双机环境部署飞控遥测桥，验证地面 `/planner/path` 到机载回执，并尝试 CP2102N 串口 MAVROS | 两台 Ubuntu `catkin_make` 通过；60 点路径回执成功；MAVROS 可打开 `/dev/ttyUSB0` | `57600/115200/460800/921600` 原始串口输入均为 0，待检查 PX4 `TELEM2` 接线、供电和 MAVLink 参数。
 - 2026-07-15 | `feature/fc-bridge` | 新增 MAVROS/PX4 只读遥测桥和可配置启动文件，统一发布 `/drone/state` | Python 编译、ROS XML 解析和 Git 空白检查通过 | 尚未使用真实 Pixhawk 验证串口、波特率和 MAVLink 心跳。
 - 2026-07-15 | `main` | 将 `README.md` 的标题和说明文字翻译为中文，保留命令、topic 和网络示例 | Markdown 差异与空白检查通过 | 示例 IP 仍需按实际网络替换。
 - 2026-07-15 | `main` | 新增根目录 Codex 协作说明，记录架构、启动顺序、占位实现、验证要求和 Git 协作规则 | 文档结构与 Git 空白检查通过 | 后续接口或项目状态变化时必须持续更新本文件。

@@ -168,3 +168,12 @@ rostopic echo /drone/state
 ```bash
 roslaunch nuedc_ground_air onboard_fc_telemetry.launch start_mavros:=false
 ```
+
+如果 MAVROS 可以打开 `/dev/ttyUSB0`，但 `/mavros/state.connected` 始终为 `False`，先确认串口是否真的收到飞控数据，再继续调整 ROS：
+
+```bash
+stty -F /dev/ttyUSB0 raw 921600 cs8 -cstopb -parenb
+timeout 2 dd if=/dev/ttyUSB0 bs=64 count=1 status=none | wc -c
+```
+
+结果持续为 `0` 表示飞控没有向该串口发送数据。PX4 配套计算机通常连接 `TELEM2`，接线应为飞控 `TX -> CP2102 RX`、飞控 `RX -> CP2102 TX`、`GND -> GND`。飞控单独供电时不要连接适配器的 VCC，避免反向供电。PX4 侧应检查 `MAV_1_CONFIG=TELEM2`、`MAV_1_MODE=Onboard`，并让 `SER_TEL2_BAUD` 与 MAVROS 的 `fcu_url` 波特率一致；修改后重启飞控。
