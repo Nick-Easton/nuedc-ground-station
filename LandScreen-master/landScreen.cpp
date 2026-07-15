@@ -601,6 +601,32 @@ void LandScreen::parseJson(const QByteArray &jsonData)
     }
 
     QJsonObject obj = doc.object();
+    if (obj.contains("forbidden") && obj["forbidden"].isArray()) {
+        QLabel *forbiddenLabels[] = {labelF1, labelF2, labelF3};
+        for (int index = 0; index < 3; ++index) {
+            dataSend[QString("f%1x").arg(index + 1)] = -1;
+            dataSend[QString("f%1y").arg(index + 1)] = -1;
+            forbiddenLabels[index]->setText("NULL");
+        }
+
+        QJsonArray forbiddenArray = obj["forbidden"].toArray();
+        int index = 0;
+        for (const QJsonValue &value : forbiddenArray) {
+            if (index >= 3 || !value.isObject()) continue;
+            QJsonObject zone = value.toObject();
+            int a = zone["a"].toInt(-1);
+            int b = zone["b"].toInt(-1);
+            if (a < 1 || a > 9 || b < 1 || b > 7) continue;
+
+            dataSend[QString("f%1x").arg(index + 1)] = a;
+            dataSend[QString("f%1y").arg(index + 1)] = b;
+            forbiddenLabels[index]->setText(
+                QString("禁飞区%1（A%2,B%3）").arg(index + 1).arg(a).arg(b)
+            );
+            ++index;
+        }
+    }
+
     if (!obj.contains("planner") || !obj["planner"].isArray()) {
         qWarning() << "JSON does not contain 'planner' array.";
         return;
@@ -694,6 +720,29 @@ void LandScreen::drawOnMap()
     QPixmap pixmap = originalMapPixmap.scaled(mapWidth, mapHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing, true);
+
+    painter.save();
+    for (int index = 1; index <= 3; ++index) {
+        int a = dataSend.value(QString("f%1x").arg(index)).toInt(-1);
+        int b = dataSend.value(QString("f%1y").arg(index)).toInt(-1);
+        if (a < 1 || a > cols || b < 1 || b > rows) {
+            continue;
+        }
+
+        QRectF forbiddenRect(
+            (a - 1) * cellWidth,
+            mapHeight - b * cellHeight,
+            cellWidth,
+            cellHeight
+        );
+        painter.fillRect(forbiddenRect, QColor(180, 0, 0, 105));
+        painter.setPen(QPen(QColor(130, 0, 0), 3));
+        painter.drawRect(forbiddenRect);
+        painter.drawLine(forbiddenRect.topLeft(), forbiddenRect.bottomRight());
+        painter.drawLine(forbiddenRect.topRight(), forbiddenRect.bottomLeft());
+    }
+    painter.restore();
+
     QPen pen(Qt::red, 4);
     painter.setPen(pen);
 

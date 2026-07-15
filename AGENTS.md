@@ -154,7 +154,7 @@ roslaunch nuedc_ground_air onboard_real_vision_demo.launch start_yolo:=false
 
 修改或解释代码时必须明确以下限制：
 
-- `ground_path_planner.py` 当前只遍历固定的 9×7 网格，按列往返生成覆盖路径，并跳过最多三个禁区格；它不是通用 A*、Dijkstra 或动态避障规划器。
+- `ground_path_planner.py` 当前只遍历固定的 9×7 网格，按行生成覆盖顺序，并用四邻域 BFS 在自由格之间补齐绕行段；它不是通用连续空间规划器或动态避障规划器，绕行时可能重复经过自由格。
 - 默认网格间距为 `0.5 m`，默认高度为 `2.0 m`，可通过 launch 参数修改。
 - `onboard_path_receiver.py` 只检查 `frame_id`、空路径、点数和有限坐标，不会向飞控发送航点。
 - `fc_state_bridge.py` 只读取遥测并发布 `/drone/state`，不会解锁、切换模式、起飞或发送设定值。
@@ -163,6 +163,7 @@ roslaunch nuedc_ground_air onboard_real_vision_demo.launch start_yolo:=false
 - 桥接节点把图像检测中心按简单比例映射到演示场地，这是占位定位逻辑，不是真实目标地理定位。
 - `launch=true` 只在从 false 变为 true 的上升沿触发一次 `START`。
 - TCP 协议是一行一个 JSON；修改任一端协议时必须同时修改另一端并保留换行分隔。
+- 路径回传 JSON 的 `forbidden` 是可选数组，元素格式为 `{"a":1..9,"b":1..7}`；LandScreen 用它同步标签和禁飞格覆盖层，旧客户端可忽略。
 - 尚未实现真实飞控桥、真实相机定位、完整安全状态机和实际路径执行闭环。
 
 ## 修改规则
@@ -216,6 +217,7 @@ YYYY-MM-DD | 作者/分支 | 变更摘要 | 已执行的验证 | 已知问题
 
 当前记录：
 
+- 2026-07-15 | `feature/real-yolo` | 修复覆盖路径删除禁飞航点后仍用直线穿越禁飞格的问题，使用自由网格 BFS 绕行并在 LandScreen 标记禁飞格 | Python 约束检查通过；双机生成 69 点路径、覆盖 60 个自由格、禁飞格访问为 0、Qt 两次完成 69 点重绘 | 仍是固定 9×7 静态网格，不处理动态障碍。
 - 2026-07-15 | `feature/real-yolo` | 接入 USB Camera + `yolo_trt_ros` 检测适配和集成启动，并让 LandScreen 支持运行时服务器地址 | 两台 Ubuntu Python/XML 检查与 `catkin_make`、Qt 构建、模拟 `vision_msgs -> TCP -> UI` 通过；真实 `/dev/video0` 原图与带框图约 30 Hz | 空场景检测与通信正常，真实动物正样本识别尚待验证。
 - 2026-07-15 | `feature/fc-bridge` | 在真实双机环境部署飞控遥测桥，验证地面 `/planner/path` 到机载回执，并尝试 CP2102N 串口 MAVROS | 两台 Ubuntu `catkin_make` 通过；60 点路径回执成功；MAVROS 可打开 `/dev/ttyUSB0` | `57600/115200/460800/921600` 原始串口输入均为 0，待检查 PX4 `TELEM2` 接线、供电和 MAVLink 参数。
 - 2026-07-15 | `feature/fc-bridge` | 新增 MAVROS/PX4 只读遥测桥和可配置启动文件，统一发布 `/drone/state` | Python 编译、ROS XML 解析和 Git 空白检查通过 | 尚未使用真实 Pixhawk 验证串口、波特率和 MAVLink 心跳。
