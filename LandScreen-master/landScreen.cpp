@@ -77,7 +77,6 @@ void LandScreen::initSocket()
     connect(reconnectTimer, &QTimer::timeout, this, [this]{
         if (socket->state() == QAbstractSocket::UnconnectedState) {
             socket->abort(); // 清理旧连接
-            socket->connectToHost(SERVER_IP, SERVER_PORT);
             socket->connectToHost(landscreenServerIp(), landscreenServerPort());
             qDebug() << "LandScreen socket reconnecting...";
         }

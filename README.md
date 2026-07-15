@@ -177,3 +177,54 @@ timeout 2 dd if=/dev/ttyUSB0 bs=64 count=1 status=none | wc -c
 ```
 
 结果持续为 `0` 表示飞控没有向该串口发送数据。PX4 配套计算机通常连接 `TELEM2`，接线应为飞控 `TX -> CP2102 RX`、飞控 `RX -> CP2102 TX`、`GND -> GND`。飞控单独供电时不要连接适配器的 VCC，避免反向供电。PX4 侧应检查 `MAV_1_CONFIG=TELEM2`、`MAV_1_MODE=Onboard`，并让 `SER_TEL2_BAUD` 与 MAVROS 的 `fcu_url` 波特率一致；修改后重启飞控。
+
+## 8. 真实 YOLO 检测接入
+
+机载真实识别包位于 `~/catkin_ws_yolo_trt`。`yolo_trt_ros` 读取 USB 摄像头并发布标准消息：
+
+```text
+/usb_cam/image_raw              sensor_msgs/Image
+/yolo_trt_node/detections       vision_msgs/Detection2DArray
+/yolo_trt_node/annotated        sensor_msgs/Image
+```
+
+`vision_detection_adapter.py` 将它转换成空地通信统一使用的：
+
+```text
+/vision/detections  nuedc_ground_air/Detection2D
+```
+
+完整数据流为：
+
+```text
+USB Camera -> /usb_cam/image_raw -> yolo_trt_ros
+yolo_trt_ros -> /yolo_trt_node/detections -> vision_detection_adapter
+vision_detection_adapter -> /vision/detections -> landscreen_ros1_bridge
+landscreen_ros1_bridge -> TCP JSON -> LandScreen 目标信息
+```
+
+启动前必须按顺序加载两个工作区；后加载的 `nuedc_ground_air` 工作区会叠加在 YOLO 工作区之上：
+
+```bash
+source /opt/ros/noetic/setup.bash
+source ~/catkin_ws_yolo_trt/devel/setup.bash
+source ~/catkin_ws/devel/setup.bash
+roslaunch nuedc_ground_air onboard_real_vision_demo.launch \
+  camera:=/dev/video0 show_window:=false
+```
+
+如果 YOLO 与摄像头已经由其他终端启动，只启动空地通信与检测适配器：
+
+```bash
+roslaunch nuedc_ground_air onboard_real_vision_demo.launch start_yolo:=false
+```
+
+查看带框画面：
+
+```bash
+rqt_image_view /yolo_trt_node/annotated
+```
+
+适配器将类别编号映射为 `elephant`、`tiger`、`monkey`、`kongque`、`wolf`，并额外发布 JSON 统计 `/vision/summary`。该启动文件会关闭 `fake_yolo_node.py`，避免模拟检测与真实检测同时发布。默认置信度为 `0.60`，默认最多以 `5 Hz` 转发每帧置信度最高的 10 个目标；这些值均可通过 launch 参数修改。
+
+LandScreen 的绿色“发送”按钮只发送禁飞区和任务信息。识别结果由桥接节点自动转发到“显示目标信息”页面。当前只回传类别、置信度和检测框；桥内由像素中心换算场地坐标的逻辑仍是模拟占位，不代表真实目标定位。

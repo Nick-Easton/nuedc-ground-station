@@ -23,6 +23,7 @@
 7. 机载路径接收和基础合法性检查，以及 `/planner/path_ack` 回执。
 8. Git 仓库初始化、Linux 换行规则、Python 可执行权限和构建产物忽略规则。
 9. 通过 MAVROS 读取 PX4 飞控状态，并统一发布 `/drone/state`；当前仅遥测，不发送控制命令。
+10. 将 `yolo_trt_ros` 的 `vision_msgs/Detection2DArray` 转换为统一检测 topic，并通过现有 TCP 桥回传 LandScreen。
 
 首次 GitHub 基线提交为 `d11dd1e`（`Initial ground station implementation`）。后续进度以 `main` 上的实际提交为准，不要在代码中依赖该提交号。
 
@@ -38,6 +39,7 @@
 | `scripts/ground_path_planner.py` | 根据禁区格生成 `/planner/path`。它是后台节点，没有窗口。 |
 | `scripts/onboard_path_receiver.py` | 验证收到的路径并发布回执；当前不控制飞行器。 |
 | `scripts/fc_state_bridge.py` | 读取 MAVROS 状态、电池和本地位姿，发布 `/drone/state`；不发送飞控命令。 |
+| `scripts/vision_detection_adapter.py` | 将 `/yolo_trt_node/detections` 转换为 `/vision/detections` 和 `/vision/summary`，并限制转发速率和单帧数量。 |
 | `LandScreen-master/` | Qt 地图界面和本地假服务器。可执行文件名为 `planescreen`。 |
 | `launch/` | ROS 1 启动文件。 |
 | `msg/` | ROS 1 自定义消息。修改后必须重新运行 `catkin_make`。 |
@@ -67,6 +69,8 @@ ground_path_planner
 - `/planner/path`：`nav_msgs/Path`，坐标系必须是 `map`。
 - `/planner/path_ack`：机载接收器的 JSON 字符串回执。
 - `/mavros/state`、`/mavros/battery`、`/mavros/local_position/pose`：MAVROS 原始飞控遥测输入。
+- `/yolo_trt_node/detections`：真实 TensorRT YOLO 发布的 `vision_msgs/Detection2DArray`。
+- `/vision/summary`：适配器发布的单帧类别计数 JSON。
 
 ## 正确启动顺序
 
@@ -129,6 +133,23 @@ roslaunch nuedc_ground_air onboard_fc_telemetry.launch \
 roslaunch nuedc_ground_air onboard_fc_telemetry.launch start_mavros:=false
 ```
 
+### 真实视觉通信
+
+启动 USB 摄像头、TensorRT YOLO、ROS/TCP 桥和视觉适配器：
+
+```bash
+source /opt/ros/noetic/setup.bash
+source ~/catkin_ws_yolo_trt/devel/setup.bash
+source ~/catkin_ws/devel/setup.bash
+roslaunch nuedc_ground_air onboard_real_vision_demo.launch camera:=/dev/video0 show_window:=false
+```
+
+YOLO 已在其他终端运行时：
+
+```bash
+roslaunch nuedc_ground_air onboard_real_vision_demo.launch start_yolo:=false
+```
+
 ## 当前限制和占位实现
 
 修改或解释代码时必须明确以下限制：
@@ -137,6 +158,7 @@ roslaunch nuedc_ground_air onboard_fc_telemetry.launch start_mavros:=false
 - 默认网格间距为 `0.5 m`，默认高度为 `2.0 m`，可通过 launch 参数修改。
 - `onboard_path_receiver.py` 只检查 `frame_id`、空路径、点数和有限坐标，不会向飞控发送航点。
 - `fc_state_bridge.py` 只读取遥测并发布 `/drone/state`，不会解锁、切换模式、起飞或发送设定值。
+- `vision_detection_adapter.py` 只转换检测框消息；当前没有深度融合、相机标定投影或真实地理坐标估计。
 - `fake_yolo_node.py` 是模拟数据源，不代表真实识别效果。
 - 桥接节点把图像检测中心按简单比例映射到演示场地，这是占位定位逻辑，不是真实目标地理定位。
 - `launch=true` 只在从 false 变为 true 的上升沿触发一次 `START`。
@@ -194,6 +216,7 @@ YYYY-MM-DD | 作者/分支 | 变更摘要 | 已执行的验证 | 已知问题
 
 当前记录：
 
+- 2026-07-15 | `feature/real-yolo` | 接入 USB Camera + `yolo_trt_ros` 检测适配和集成启动，并让 LandScreen 支持运行时服务器地址 | 两台 Ubuntu Python/XML 检查与 `catkin_make`、Qt 构建、模拟 `vision_msgs -> TCP -> UI` 日志验证通过 | `/dev/video0` 当前未连接，真实相机推理尚未验证。
 - 2026-07-15 | `feature/fc-bridge` | 在真实双机环境部署飞控遥测桥，验证地面 `/planner/path` 到机载回执，并尝试 CP2102N 串口 MAVROS | 两台 Ubuntu `catkin_make` 通过；60 点路径回执成功；MAVROS 可打开 `/dev/ttyUSB0` | `57600/115200/460800/921600` 原始串口输入均为 0，待检查 PX4 `TELEM2` 接线、供电和 MAVLink 参数。
 - 2026-07-15 | `feature/fc-bridge` | 新增 MAVROS/PX4 只读遥测桥和可配置启动文件，统一发布 `/drone/state` | Python 编译、ROS XML 解析和 Git 空白检查通过 | 尚未使用真实 Pixhawk 验证串口、波特率和 MAVLink 心跳。
 - 2026-07-15 | `main` | 将 `README.md` 的标题和说明文字翻译为中文，保留命令、topic 和网络示例 | Markdown 差异与空白检查通过 | 示例 IP 仍需按实际网络替换。

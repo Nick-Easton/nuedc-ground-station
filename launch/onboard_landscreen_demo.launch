@@ -1,9 +1,10 @@
 <launch>
   <arg name="bridge_host" default="0.0.0.0"/>
   <arg name="bridge_port" default="8001"/>
+  <arg name="use_fake_yolo" default="true"/>
 
   <node pkg="nuedc_ground_air" type="mission_node.py" name="mission_node" output="screen"/>
-  <node pkg="nuedc_ground_air" type="fake_yolo_node.py" name="fake_yolo_node" output="screen"/>
+  <node pkg="nuedc_ground_air" type="fake_yolo_node.py" name="fake_yolo_node" output="screen" if="$(arg use_fake_yolo)"/>
   <node pkg="nuedc_ground_air" type="onboard_path_receiver.py" name="onboard_path_receiver" output="screen"/>
   <node pkg="nuedc_ground_air" type="landscreen_ros1_bridge.py" name="landscreen_ros1_bridge" output="screen">
     <param name="host" value="$(arg bridge_host)"/>
