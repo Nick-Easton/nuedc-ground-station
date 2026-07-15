@@ -216,7 +216,7 @@ YYYY-MM-DD | 作者/分支 | 变更摘要 | 已执行的验证 | 已知问题
 
 当前记录：
 
-- 2026-07-15 | `feature/real-yolo` | 接入 USB Camera + `yolo_trt_ros` 检测适配和集成启动，并让 LandScreen 支持运行时服务器地址 | 两台 Ubuntu Python/XML 检查与 `catkin_make`、Qt 构建、模拟 `vision_msgs -> TCP -> UI` 日志验证通过 | `/dev/video0` 当前未连接，真实相机推理尚未验证。
+- 2026-07-15 | `feature/real-yolo` | 接入 USB Camera + `yolo_trt_ros` 检测适配和集成启动，并让 LandScreen 支持运行时服务器地址 | 两台 Ubuntu Python/XML 检查与 `catkin_make`、Qt 构建、模拟 `vision_msgs -> TCP -> UI` 通过；真实 `/dev/video0` 原图与带框图约 30 Hz | 空场景检测与通信正常，真实动物正样本识别尚待验证。
 - 2026-07-15 | `feature/fc-bridge` | 在真实双机环境部署飞控遥测桥，验证地面 `/planner/path` 到机载回执，并尝试 CP2102N 串口 MAVROS | 两台 Ubuntu `catkin_make` 通过；60 点路径回执成功；MAVROS 可打开 `/dev/ttyUSB0` | `57600/115200/460800/921600` 原始串口输入均为 0，待检查 PX4 `TELEM2` 接线、供电和 MAVLink 参数。
 - 2026-07-15 | `feature/fc-bridge` | 新增 MAVROS/PX4 只读遥测桥和可配置启动文件，统一发布 `/drone/state` | Python 编译、ROS XML 解析和 Git 空白检查通过 | 尚未使用真实 Pixhawk 验证串口、波特率和 MAVLink 心跳。
 - 2026-07-15 | `main` | 将 `README.md` 的标题和说明文字翻译为中文，保留命令、topic 和网络示例 | Markdown 差异与空白检查通过 | 示例 IP 仍需按实际网络替换。

@@ -228,3 +228,5 @@ rqt_image_view /yolo_trt_node/annotated
 适配器将类别编号映射为 `elephant`、`tiger`、`monkey`、`kongque`、`wolf`，并额外发布 JSON 统计 `/vision/summary`。该启动文件会关闭 `fake_yolo_node.py`，避免模拟检测与真实检测同时发布。默认置信度为 `0.60`，默认最多以 `5 Hz` 转发每帧置信度最高的 10 个目标；这些值均可通过 launch 参数修改。
 
 LandScreen 的绿色“发送”按钮只发送禁飞区和任务信息。识别结果由桥接节点自动转发到“显示目标信息”页面。当前只回传类别、置信度和检测框；桥内由像素中心换算场地坐标的逻辑仍是模拟占位，不代表真实目标定位。
+
+2026-07-15 已在机载电脑使用 `/dev/video0` 验证 USB Camera 和 TensorRT YOLO：`/usb_cam/image_raw` 与 `/yolo_trt_node/annotated` 均稳定在约 `30 Hz`，空场景会发布空检测数组和 `{"counts":{},"total":0}`。真实动物正样本识别仍需摆放对应图片或实物验证。
