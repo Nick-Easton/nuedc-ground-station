@@ -22,6 +22,7 @@
 6. 根据最多三个禁区格生成往复式覆盖路径的地面端规划节点。
 7. 机载路径接收和基础合法性检查，以及 `/planner/path_ack` 回执。
 8. Git 仓库初始化、Linux 换行规则、Python 可执行权限和构建产物忽略规则。
+9. 通过 MAVROS 读取 PX4 飞控状态，并统一发布 `/drone/state`；当前仅遥测，不发送控制命令。
 
 首次 GitHub 基线提交为 `d11dd1e`（`Initial ground station implementation`）。后续进度以 `main` 上的实际提交为准，不要在代码中依赖该提交号。
 
@@ -36,6 +37,7 @@
 | `scripts/landscreen_ros1_bridge.py` | TCP 8001 与 ROS topics 之间的 JSON 桥。 |
 | `scripts/ground_path_planner.py` | 根据禁区格生成 `/planner/path`。它是后台节点，没有窗口。 |
 | `scripts/onboard_path_receiver.py` | 验证收到的路径并发布回执；当前不控制飞行器。 |
+| `scripts/fc_state_bridge.py` | 读取 MAVROS 状态、电池和本地位姿，发布 `/drone/state`；不发送飞控命令。 |
 | `LandScreen-master/` | Qt 地图界面和本地假服务器。可执行文件名为 `planescreen`。 |
 | `launch/` | ROS 1 启动文件。 |
 | `msg/` | ROS 1 自定义消息。修改后必须重新运行 `catkin_make`。 |
@@ -64,6 +66,7 @@ ground_path_planner
 - `/drone/state`：飞行器状态，目前主要供 PyQt5 面板显示。
 - `/planner/path`：`nav_msgs/Path`，坐标系必须是 `map`。
 - `/planner/path_ack`：机载接收器的 JSON 字符串回执。
+- `/mavros/state`、`/mavros/battery`、`/mavros/local_position/pose`：MAVROS 原始飞控遥测输入。
 
 ## 正确启动顺序
 
@@ -111,6 +114,21 @@ cd LandScreen-master/build
 LANDSCREEN_SERVER_IP=127.0.0.1 LANDSCREEN_SERVER_PORT=8001 ./planescreen
 ```
 
+### 只读飞控遥测
+
+机载电脑通过 USB 连接 PX4/Pixhawk 时：
+
+```bash
+roslaunch nuedc_ground_air onboard_fc_telemetry.launch \
+  fcu_url:=/dev/ttyACM0:57600
+```
+
+如果 MAVROS 已经由其他工程启动：
+
+```bash
+roslaunch nuedc_ground_air onboard_fc_telemetry.launch start_mavros:=false
+```
+
 ## 当前限制和占位实现
 
 修改或解释代码时必须明确以下限制：
@@ -118,6 +136,7 @@ LANDSCREEN_SERVER_IP=127.0.0.1 LANDSCREEN_SERVER_PORT=8001 ./planescreen
 - `ground_path_planner.py` 当前只遍历固定的 9×7 网格，按列往返生成覆盖路径，并跳过最多三个禁区格；它不是通用 A*、Dijkstra 或动态避障规划器。
 - 默认网格间距为 `0.5 m`，默认高度为 `2.0 m`，可通过 launch 参数修改。
 - `onboard_path_receiver.py` 只检查 `frame_id`、空路径、点数和有限坐标，不会向飞控发送航点。
+- `fc_state_bridge.py` 只读取遥测并发布 `/drone/state`，不会解锁、切换模式、起飞或发送设定值。
 - `fake_yolo_node.py` 是模拟数据源，不代表真实识别效果。
 - 桥接节点把图像检测中心按简单比例映射到演示场地，这是占位定位逻辑，不是真实目标地理定位。
 - `launch=true` 只在从 false 变为 true 的上升沿触发一次 `START`。
@@ -175,6 +194,7 @@ YYYY-MM-DD | 作者/分支 | 变更摘要 | 已执行的验证 | 已知问题
 
 当前记录：
 
+- 2026-07-15 | `feature/fc-bridge` | 新增 MAVROS/PX4 只读遥测桥和可配置启动文件，统一发布 `/drone/state` | Python 编译、ROS XML 解析和 Git 空白检查通过 | 尚未使用真实 Pixhawk 验证串口、波特率和 MAVLink 心跳。
 - 2026-07-15 | `main` | 将 `README.md` 的标题和说明文字翻译为中文，保留命令、topic 和网络示例 | Markdown 差异与空白检查通过 | 示例 IP 仍需按实际网络替换。
 - 2026-07-15 | `main` | 新增根目录 Codex 协作说明，记录架构、启动顺序、占位实现、验证要求和 Git 协作规则 | 文档结构与 Git 空白检查通过 | 后续接口或项目状态变化时必须持续更新本文件。
 - 2026-07-15 | `main` | 创建 GitHub 私有仓库，提交 ROS 1 演示、LandScreen 桥接、固定网格规划和路径验证基线 | Python 语法、ROS XML/launch 格式检查通过 | 未在本机完成 ROS/Qt 全量构建。

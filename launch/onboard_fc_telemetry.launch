@@ -1,0 +1,17 @@
+<launch>
+  <arg name="start_mavros" default="true"/>
+  <arg name="fcu_url" default="/dev/ttyACM0:57600"/>
+  <arg name="gcs_url" default=""/>
+  <arg name="state_timeout" default="3.0"/>
+  <arg name="publish_rate" default="5.0"/>
+
+  <include file="$(find mavros)/launch/px4.launch" if="$(arg start_mavros)">
+    <arg name="fcu_url" value="$(arg fcu_url)"/>
+    <arg name="gcs_url" value="$(arg gcs_url)"/>
+  </include>
+
+  <node pkg="nuedc_ground_air" type="fc_state_bridge.py" name="fc_state_bridge" output="screen">
+    <param name="state_timeout" value="$(arg state_timeout)"/>
+    <param name="publish_rate" value="$(arg publish_rate)"/>
+  </node>
+</launch>

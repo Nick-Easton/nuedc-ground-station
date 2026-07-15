@@ -29,6 +29,7 @@ catkin_package(
 )
 
 catkin_install_python(PROGRAMS
+  scripts/fc_state_bridge.py
   scripts/fake_yolo_node.py
   scripts/ground_path_planner.py
   scripts/ground_station_gui.py

@@ -82,9 +82,8 @@ quit
 
 1. 使用真实相机和 YOLO 节点替换 `fake_yolo_node.py`。
 2. 根据检测框中心、相机参数、飞行高度和偏航角估算目标位置。
-3. 添加 `fc_bridge_node`，读取飞控反馈。
-4. 在安全逻辑经过充分测试后，再增加低速控制设定值输出。
-5. 继续完善现有 PyQt 地面站界面，或增加 rqt 界面。
+3. 在安全逻辑经过充分测试后，再增加低速控制设定值输出。
+4. 继续完善现有 PyQt 地面站界面，或增加 rqt 界面。
 
 ## 5. 在 ROS 1 中使用 NJUPT Qt LandScreen
 
@@ -132,3 +131,40 @@ ground_path_planner -> /planner/path -> onboard_path_receiver
 ```
 
 机载接收节点会通过 `/planner/path_ack` 发布路径校验结果。
+
+## 7. PX4 飞控遥测接入
+
+第一阶段只读取飞控状态，不调用解锁、模式切换、起飞或位置控制服务。通过 USB 连接 Pixhawk 时，先确认串口设备：
+
+```bash
+ls -l /dev/ttyACM* /dev/ttyUSB* 2>/dev/null
+```
+
+使用常见的 Pixhawk USB 设备启动 MAVROS 和状态桥：
+
+```bash
+roslaunch nuedc_ground_air onboard_fc_telemetry.launch \
+  fcu_url:=/dev/ttyACM0:57600
+```
+
+如果使用 USB 转串口模块，设备通常是 `/dev/ttyUSB0`；如果使用 Jetson UART，则应传入实际串口和飞控端配置一致的波特率，例如：
+
+```bash
+roslaunch nuedc_ground_air onboard_fc_telemetry.launch \
+  fcu_url:=/dev/ttyTHS1:921600
+```
+
+检查 MAVROS 与统一状态 topic：
+
+```bash
+rostopic echo /mavros/state
+rostopic echo /drone/state
+```
+
+`/mavros/state.connected` 为 `True` 表示 MAVLink 心跳已经建立。`fc_state_bridge.py` 将模式、解锁状态、电池百分比、本地高度和偏航角整理为 `/drone/state`；超过 `3 s` 没有状态更新时会将 `connected` 置为 `False`。
+
+如果 MAVROS 已由其他启动文件运行，仅启动状态桥，避免重复占用串口：
+
+```bash
+roslaunch nuedc_ground_air onboard_fc_telemetry.launch start_mavros:=false
+```
