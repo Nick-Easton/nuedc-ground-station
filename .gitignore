@@ -1,0 +1,39 @@
+# ROS/catkin and CMake build outputs
+build/
+devel/
+install/
+log/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# IDE and editor metadata
+.idea/
+.vscode/
+*.user
+
+# Runtime logs
+*.log
+/LandScreen-master/log.txt
+
+# Local environment and credentials
+.env
+.env.*
+*.pem
+*.key
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Generated source archives (GitHub already provides repository downloads)
+*.zip
+*.tar
+*.tar.gz

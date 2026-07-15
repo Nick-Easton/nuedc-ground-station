@@ -1,0 +1,9 @@
+<launch>
+  <arg name="host" default="0.0.0.0"/>
+  <arg name="port" default="8001"/>
+
+  <node pkg="nuedc_ground_air" type="landscreen_ros1_bridge.py" name="landscreen_ros1_bridge" output="screen">
+    <param name="host" value="$(arg host)"/>
+    <param name="port" value="$(arg port)"/>
+  </node>
+</launch>

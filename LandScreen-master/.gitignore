@@ -1,0 +1,7 @@
+.vscode/
+.idea/
+cmake-build-debug/
+build/
+install/
+log/
+COLCON_IGNORE

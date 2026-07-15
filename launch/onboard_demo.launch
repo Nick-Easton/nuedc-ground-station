@@ -1,0 +1,5 @@
+<launch>
+  <node pkg="nuedc_ground_air" type="mission_node.py" name="mission_node" output="screen"/>
+  <node pkg="nuedc_ground_air" type="fake_yolo_node.py" name="fake_yolo_node" output="screen"/>
+</launch>
+

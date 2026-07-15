@@ -1,0 +1,3 @@
+<launch>
+  <node pkg="nuedc_ground_air" type="ground_station_gui.py" name="ground_station_gui" output="screen"/>
+</launch>
