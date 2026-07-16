@@ -5,6 +5,7 @@ import threading
 
 import rospy
 from nav_msgs.msg import Path
+from std_msgs.msg import String
 
 from nuedc_ground_air.msg import Detection2D, ForbiddenZones, MissionCommand, MissionState
 
@@ -16,11 +17,17 @@ class LandScreenRos1Bridge:
         self.clients = []
         self.clients_lock = threading.Lock()
         self.last_launch = False
+        self.last_forbidden = []
+        self.grid_mode = bool(rospy.get_param("~grid_mode", True))
 
         self.zones_pub = rospy.Publisher("/mission/forbidden_zones", ForbiddenZones, queue_size=10)
         self.command_pub = rospy.Publisher("/mission/command", MissionCommand, queue_size=10)
         rospy.Subscriber("/mission/state", MissionState, self.on_mission_state)
+        rospy.Subscriber(
+            "/mission/forbidden_zones", ForbiddenZones, self.on_forbidden_zones
+        )
         rospy.Subscriber("/vision/detections", Detection2D, self.on_detection)
+        rospy.Subscriber("/vision/grid_result", String, self.on_grid_result)
         rospy.Subscriber("/planner/path", Path, self.on_path)
 
     def serve_forever(self):
@@ -84,9 +91,11 @@ class LandScreenRos1Bridge:
         zones.f3x = int(data.get("f3x", -1))
         zones.f3y = int(data.get("f3y", -1))
         zones.launch = bool(data.get("launch", False))
+        self.on_forbidden_zones(zones)
         self.zones_pub.publish(zones)
 
         if zones.launch and not self.last_launch:
+            self.send_to_ground({"planner": [], "reset_targets": True})
             self.publish_command("START")
         self.last_launch = zones.launch
 
@@ -113,6 +122,8 @@ class LandScreenRos1Bridge:
         self.send_to_ground({"planner": [], "tx": -1, "ty": -1, "tn": "NULL"})
 
     def on_detection(self, msg):
+        if self.grid_mode:
+            return
         if msg.confidence < 0.60:
             return
 
@@ -128,6 +139,26 @@ class LandScreenRos1Bridge:
             }
         )
 
+    def on_grid_result(self, msg):
+        try:
+            result = json.loads(msg.data)
+        except ValueError as exc:
+            rospy.logwarn("Bad grid recognition result: %s", exc)
+            return
+        self.send_to_ground({"planner": [], "grid_result": result})
+        rospy.loginfo("Forwarded grid recognition result: %s", result.get("grid", ""))
+
+    def on_forbidden_zones(self, msg):
+        forbidden = []
+        for a, b in (
+            (msg.f1x, msg.f1y),
+            (msg.f2x, msg.f2y),
+            (msg.f3x, msg.f3y),
+        ):
+            if 1 <= a <= 9 and 1 <= b <= 7 and {"a": a, "b": b} not in forbidden:
+                forbidden.append({"a": a, "b": b})
+        self.last_forbidden = forbidden
+
     def on_path(self, msg):
         planner = []
         for pose in msg.poses:
@@ -137,7 +168,15 @@ class LandScreenRos1Bridge:
                     "y": round(pose.pose.position.y, 3),
                 }
             )
-        self.send_to_ground({"planner": planner, "tx": -1, "ty": -1, "tn": "NULL"})
+        self.send_to_ground(
+            {
+                "planner": planner,
+                "forbidden": list(self.last_forbidden),
+                "tx": -1,
+                "ty": -1,
+                "tn": "NULL",
+            }
+        )
         rospy.loginfo("Forwarded ground path to LandScreen: %d points", len(planner))
 
     def send_to_ground(self, payload):
