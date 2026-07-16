@@ -10,7 +10,7 @@ catkin_ws/
     nuedc_ground_air/
 ```
 
-在机载电脑上运行 `roscore`，地面站作为远程 ROS 节点连接到机载电脑。
+比赛部署中，ROS Master、路径规划、视觉适配和 TCP 桥均运行在机载 NX；地面站 Nano 只运行 Qt UI，通过 TCP 8001 连接 NX，不需要加入 ROS Master。
 
 ## 1. 复制到 Ubuntu ROS 1 工作空间
 
@@ -30,22 +30,22 @@ source devel/setup.bash
 
 ## 2. 网络配置
 
-在机载电脑上执行：
+在机载电脑上执行（按现场地址替换 `<nx_ip>`）：
 
 ```bash
-export ROS_MASTER_URI=http://172.20.10.11:11311
-export ROS_IP=172.20.10.11
+export ROS_MASTER_URI=http://<nx_ip>:11311
+export ROS_IP=<nx_ip>
 roscore
 ```
 
-在地面站电脑上执行：
+地面站 Nano 只需确认 NX 的 TCP 端口可达：
 
 ```bash
-export ROS_MASTER_URI=http://172.20.10.11:11311
-export ROS_IP=172.20.10.9
+ping <nx_ip>
+timeout 3 bash -c 'echo >/dev/tcp/<nx_ip>/8001'
 ```
 
-请根据实际网络环境替换上述 IP 地址。
+仅连接同一 Wi-Fi 不一定代表设备互通；热点或路由器的客户端隔离会导致 UI 一直停在“航线规划中”。
 
 ## 3. 基础通信演示
 
@@ -89,37 +89,35 @@ quit
 
 NJUPT 地面站并不依赖 ROS 2。它通过 TCP JSON 与机载电脑通信，因此 ROS 1 系统只需要增加一个桥接节点。
 
-在 ROS 1 机载电脑上执行：
+比赛集成模式在 ROS 1 机载电脑上执行：
 
 ```bash
 cd ~/catkin_ws
 catkin_make
+source /opt/ros/noetic/setup.bash
+source ~/catkin_ws_yolo_trt/devel/setup.bash
 source devel/setup.bash
 chmod +x src/nuedc_ground_air/scripts/*.py
-roslaunch nuedc_ground_air onboard_landscreen_demo.launch
+roslaunch nuedc_ground_air landscreen_ros1_bridge.launch camera:=/dev/video0
 ```
 
 在 Qt 地面站电脑上执行：
 
 ```bash
 cd ~/LandScreen-master/build
-LANDSCREEN_SERVER_IP=<onboard_ros1_ip> LANDSCREEN_SERVER_PORT=8001 ./planescreen
+./planescreen
 ```
 
-桥接节点接收 LandScreen 发来的禁区 JSON，并发布到 `/mission/forbidden_zones`。当 `launch=true` 时，它会向 `/mission/command` 发送 `START`，同时将 ROS 路径和目标检测结果回传给 LandScreen。
+首次启动时在 UI 右下角“连接设置”填写 NX 的 IP 和端口 8001；配置由 `QSettings` 保存，修改 IP 不需要重新编译。也可以用 `LANDSCREEN_SERVER_IP` 和 `LANDSCREEN_SERVER_PORT` 提供首次默认值。
+
+集成 launch 同时启动 TCP 桥、路径规划、路径校验、视觉消息转换、按格识别状态机和视觉启动器。桥接节点接收 LandScreen 发来的禁区 JSON，并发布到 `/mission/forbidden_zones`。当 `launch=true` 时，它会向 `/mission/command` 发送 `START`；摄像头与 YOLO 在此时启动，规划路径和按格识别结果自动回传 UI。
 
 ## 6. 地面端路径规划演示
 
-在 IP 为 `172.20.10.11` 的机载电脑上启动节点：
+在机载 NX 上启动集成节点：
 
 ```bash
-roslaunch nuedc_ground_air onboard_landscreen_demo.launch
-```
-
-在 IP 为 `172.20.10.9` 的地面站电脑上启动规划节点：
-
-```bash
-roslaunch nuedc_ground_air ground_path_planner.launch
+roslaunch nuedc_ground_air landscreen_ros1_bridge.launch
 ```
 
 数据流如下：
@@ -132,7 +130,9 @@ ground_path_planner -> /planner/path -> onboard_path_receiver
 
 机载接收节点会通过 `/planner/path_ack` 发布路径校验结果。
 
-规划器先按行生成往复式覆盖顺序，再用四邻域最短路连接相邻覆盖目标。禁飞格不会出现在航点中，任意连续航点也只会移动到上下左右相邻的自由格，因此不会再用长直线跨过被跳过的禁飞格。为绕开禁飞格，路径可能重复经过部分自由格，最终航点数可能大于自由格数量。桥回传路径时会附带 `forbidden:[{"a":A,"b":B}]`，LandScreen 据此更新标签，并用半透明红色方块和叉号标出禁飞格；旧客户端可以忽略该新增字段。
+规划器生成多组确定性覆盖候选，每段使用四邻域 A* 最短路连接，并按总点数和转弯数选优。禁飞格不会出现在航点中，连续航点只会上下或左右移动；为连接未访问区域或返航，路径可能重复经过自由格。桥回传路径时会附带 `forbidden:[{"a":A,"b":B}]`，LandScreen 据此更新标签并标出禁飞格。
+
+当前规划器运行在 NX，因此 UI 必须先连通 NX 才能收到路径。Nano 到 NX 无路由、TCP 8001 未监听或规划节点未启动时，UI 会停在“航线规划中”。
 
 ## 7. PX4 飞控遥测接入
 
@@ -215,11 +215,13 @@ roslaunch nuedc_ground_air onboard_real_vision_demo.launch \
   camera:=/dev/video0 show_window:=false
 ```
 
-如果 YOLO 与摄像头已经由其他终端启动，只启动空地通信与检测适配器：
+如果 YOLO 与摄像头已经由其他终端启动，只启动检测适配器：
 
 ```bash
 roslaunch nuedc_ground_air onboard_real_vision_demo.launch start_yolo:=false
 ```
+
+`onboard_real_vision_demo.launch` 是独立视觉调试入口，不会启动 TCP 桥、规划器或按格识别状态机。比赛集成时使用第 5 节的 `landscreen_ros1_bridge.launch`，不要同时运行两个入口中的检测适配器，以免重复发布 `/vision/detections`。
 
 查看带框画面：
 
@@ -232,3 +234,29 @@ rqt_image_view /yolo_trt_node/annotated
 LandScreen 的绿色“发送”按钮只发送禁飞区和任务信息。识别结果由桥接节点自动转发到“显示目标信息”页面。当前只回传类别、置信度和检测框；桥内由像素中心换算场地坐标的逻辑仍是模拟占位，不代表真实目标定位。
 
 2026-07-15 已在机载电脑使用 `/dev/video0` 验证 USB Camera 和 TensorRT YOLO：`/usb_cam/image_raw` 与 `/yolo_trt_node/annotated` 均稳定在约 `30 Hz`，空场景会发布空检测数组和 `{"counts":{},"total":0}`。真实动物正样本识别仍需摆放对应图片或实物验证。
+
+## 闭合覆盖航线
+
+地图按 `A1..A9` 从左到右、`B1..B7` 从下到上显示，红点为 `A9,B1`。规划器只允许上下左右四邻域移动，避开禁飞格，覆盖所有可达格后返回红点。规划时生成多组候选访问顺序，每段使用 A* 最短连接，最后按总步数和转弯数选择闭合路线。无禁飞格时路线为 65 个点；禁飞格为 `A5,B3`~`A5,B5` 时为 61 个点，两者均达到对应闭合覆盖的理论下限。
+
+## 按格识别状态机
+
+`grid_recognition_state_machine.py` 仅处理视觉统计，不读写飞控、MAVROS 或路径执行指令。收到任务 `START` 后，节点等待 `/current_grid` (`std_msgs/String`) 发布 `A1B1` 这样的格子编号，稳定 0.3 秒后统计 1.0 秒。同一帧内同类检测框用于数量统计，多帧之间取单帧最大数，防止按帧累加。已完成格子会被记录，重复经过时不再上报。结果通过 `/vision/grid_result` 传到 LandScreen。
+
+与飞控/定位开发人员的边界只是一个 ROS 话题：在确认航点到达并稳定后，向 `/current_grid` 发布 `std_msgs/String`。话题名可用私有参数 `~current_grid_topic` 或 launch 参数 `current_grid_topic` 配置，也可使用 ROS remap 接到已有的到点话题。视觉节点不订阅 MAVROS，不发布速度、位置或模式切换指令。
+
+在尚未接入定位时可手动测试（只触发识别，不控制无人机）：
+
+```bash
+rostopic pub -1 /current_grid std_msgs/String "data: 'A6B1'"
+```
+
+## 竞赛参数
+
+- 场地为 9×7 格，每格 `0.5 m`，总尺寸 `4.5 m × 3.5 m`。
+- `/planner/path` 默认高度已设为 `1.2 m`，每个航点的 `z=1.2`。真正保持 `120±10 cm` 仍由后续飞控执行模块负责。
+- 按格识别默认稳定 `0.3 s`、统计 `1.0 s`，63 格纯视觉时间窗约 `81.9 s`，为 300 秒总时限保留飞行和转弯时间。
+- LandScreen 每次任务会在工程目录生成 `animal_results_yyyyMMdd_HHmmss.csv`，保存时间、格子、动物英文名和数量。
+- 激光笔是独立硬件执行项，当前视觉/规划代码不切换 GPIO 或飞控辅助通道。
+
+飞控、电机电调、MAVROS、定位、按格握手和安全验收的完整交接说明见 [`docs/无人机飞控负责人对接说明.md`](docs/无人机飞控负责人对接说明.md)。

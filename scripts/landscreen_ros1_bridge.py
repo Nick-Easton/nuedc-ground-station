@@ -5,6 +5,7 @@ import threading
 
 import rospy
 from nav_msgs.msg import Path
+from std_msgs.msg import String
 
 from nuedc_ground_air.msg import Detection2D, ForbiddenZones, MissionCommand, MissionState
 
@@ -17,6 +18,7 @@ class LandScreenRos1Bridge:
         self.clients_lock = threading.Lock()
         self.last_launch = False
         self.last_forbidden = []
+        self.grid_mode = bool(rospy.get_param("~grid_mode", True))
 
         self.zones_pub = rospy.Publisher("/mission/forbidden_zones", ForbiddenZones, queue_size=10)
         self.command_pub = rospy.Publisher("/mission/command", MissionCommand, queue_size=10)
@@ -25,6 +27,7 @@ class LandScreenRos1Bridge:
             "/mission/forbidden_zones", ForbiddenZones, self.on_forbidden_zones
         )
         rospy.Subscriber("/vision/detections", Detection2D, self.on_detection)
+        rospy.Subscriber("/vision/grid_result", String, self.on_grid_result)
         rospy.Subscriber("/planner/path", Path, self.on_path)
 
     def serve_forever(self):
@@ -92,6 +95,7 @@ class LandScreenRos1Bridge:
         self.zones_pub.publish(zones)
 
         if zones.launch and not self.last_launch:
+            self.send_to_ground({"planner": [], "reset_targets": True})
             self.publish_command("START")
         self.last_launch = zones.launch
 
@@ -118,6 +122,8 @@ class LandScreenRos1Bridge:
         self.send_to_ground({"planner": [], "tx": -1, "ty": -1, "tn": "NULL"})
 
     def on_detection(self, msg):
+        if self.grid_mode:
+            return
         if msg.confidence < 0.60:
             return
 
@@ -132,6 +138,15 @@ class LandScreenRos1Bridge:
                 "tn": msg.class_name or "target",
             }
         )
+
+    def on_grid_result(self, msg):
+        try:
+            result = json.loads(msg.data)
+        except ValueError as exc:
+            rospy.logwarn("Bad grid recognition result: %s", exc)
+            return
+        self.send_to_ground({"planner": [], "grid_result": result})
+        rospy.loginfo("Forwarded grid recognition result: %s", result.get("grid", ""))
 
     def on_forbidden_zones(self, msg):
         forbidden = []

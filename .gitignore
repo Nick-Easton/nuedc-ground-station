@@ -21,6 +21,7 @@ __pycache__/
 # Runtime logs
 *.log
 /LandScreen-master/log.txt
+/LandScreen-master/animal_results_*.csv
 
 # Local environment and credentials
 .env

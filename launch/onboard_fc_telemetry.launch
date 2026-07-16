@@ -4,10 +4,14 @@
   <arg name="gcs_url" default=""/>
   <arg name="state_timeout" default="3.0"/>
   <arg name="publish_rate" default="5.0"/>
+  <arg name="tgt_system" default="1"/>
+  <arg name="tgt_component" default="1"/>
 
-  <include file="$(find mavros)/launch/px4.launch" if="$(arg start_mavros)">
+  <include if="$(arg start_mavros)" file="$(find mavros)/launch/px4.launch">
     <arg name="fcu_url" value="$(arg fcu_url)"/>
     <arg name="gcs_url" value="$(arg gcs_url)"/>
+    <arg name="tgt_system" value="$(arg tgt_system)"/>
+    <arg name="tgt_component" value="$(arg tgt_component)"/>
   </include>
 
   <node pkg="nuedc_ground_air" type="fc_state_bridge.py" name="fc_state_bridge" output="screen">

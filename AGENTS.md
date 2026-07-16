@@ -85,22 +85,24 @@ source devel/setup.bash
 roslaunch nuedc_ground_air onboard_landscreen_demo.launch
 ```
 
-地面电脑的 ROS 终端：
+比赛集成启动（机载 NX，规划器与桥运行在同一 ROS Master）：
 
 ```bash
 cd ~/catkin_ws
+source /opt/ros/noetic/setup.bash
+source ~/catkin_ws_yolo_trt/devel/setup.bash
 source devel/setup.bash
-roslaunch nuedc_ground_air ground_path_planner.launch
+roslaunch nuedc_ground_air landscreen_ros1_bridge.launch camera:=/dev/video0
 ```
 
 地面电脑的 Qt 终端：
 
 ```bash
 cd ~/catkin_ws/src/nuedc_ground_air/LandScreen-master/build
-LANDSCREEN_SERVER_IP=YOUR_ONBOARD_IP LANDSCREEN_SERVER_PORT=8001 ./planescreen
+./planescreen
 ```
 
-两台电脑必须指向同一个 ROS master，并分别正确设置 `ROS_MASTER_URI` 和 `ROS_IP`。不要把示例地址 `172.20.10.11`、`172.20.10.9` 或 Qt 源码默认地址 `192.168.10.3` 当成固定配置。
+Nano UI 使用“连接设置”保存 NX 地址并通过 TCP 8001 通信，不需要加入 ROS Master。不要把现场 IP 写死在源码中；环境变量只作为首次默认值。
 
 ### 只测试 Qt 界面
 
@@ -154,8 +156,8 @@ roslaunch nuedc_ground_air onboard_real_vision_demo.launch start_yolo:=false
 
 修改或解释代码时必须明确以下限制：
 
-- `ground_path_planner.py` 当前只遍历固定的 9×7 网格，按行生成覆盖顺序，并用四邻域 BFS 在自由格之间补齐绕行段；它不是通用连续空间规划器或动态避障规划器，绕行时可能重复经过自由格。
-- 默认网格间距为 `0.5 m`，默认高度为 `2.0 m`，可通过 launch 参数修改。
+- `ground_path_planner.py` 当前只遍历固定的 9×7 网格，生成多组覆盖候选并用四邻域 A* 连接，按点数和转弯数选优；它不是通用连续空间规划器或动态避障规划器，连接和返航时可能重复经过自由格。
+- 默认网格间距为 `0.5 m`，比赛航线高度为 `1.2 m`，可通过 launch 参数修改。
 - `onboard_path_receiver.py` 只检查 `frame_id`、空路径、点数和有限坐标，不会向飞控发送航点。
 - `fc_state_bridge.py` 只读取遥测并发布 `/drone/state`，不会解锁、切换模式、起飞或发送设定值。
 - `vision_detection_adapter.py` 只转换检测框消息；当前没有深度融合、相机标定投影或真实地理坐标估计。
@@ -217,6 +219,12 @@ YYYY-MM-DD | 作者/分支 | 变更摘要 | 已执行的验证 | 已知问题
 
 当前记录：
 
+- 2026-07-16 | `feature/real-yolo` | 合并 `agent/contest-ground-station-integration`，保留真实 YOLO 参数、只读 MAVROS 参数和禁飞格覆盖层，并接入 A* 闭合覆盖、按格识别、CSV 与连接设置 | Python 编译、launch/package XML、Git 空白和代表性路径约束检查通过 | 当前无法通过 SSH 登录 Jetson，尚未对合并结果重新执行 catkin_make 和 Qt 构建。
+- 2026-07-16 | `agent/contest-ground-station-integration` | 汇总比赛参数、A* 闭合覆盖、真实 YOLO、按格识别、五类目标页、CSV、运行时连接设置、桌面快捷方式和一体化 NX launch | Python/XML/路径约束检查；此前已在 Jetson 完成 catkin_make、Qt CMake 构建、TCP/UI、`z=1.2` 和手动 `/current_grid` 验证 | 当前 NX 暂时离线；未修改飞控控制，路径执行、定位和激光仍待飞控负责人完成。
+- 2026-07-16 | `feature/connection-settings` | LandScreen 新增可持久保存的 NX IP/端口设置页，保存后立即重连；新增相对路径桌面快捷方式安装脚本 | Qt CMake 构建并在 Nano 截图验证连接状态与设置按钮 | 网络不互通时仍无法请求 NX 上的规划器。
+- 2026-07-16 | `feature/contest-parameters` | 按 4.5m×3.5m、0.5m 格长、1.2m 高度和 300s 时限更新规划/按格识别参数；LandScreen 增加每次任务 CSV 落盘 | Python 编译、catkin_make、Qt CMake 构建、`/planner/path` z 值和 CSV 表头验证通过 | 未修改飞控；高度跟踪、速度和激光笔须由后续执行模块落实。
+- 2026-07-16 | `feature/grid-recognition` | 新增与飞控完全解耦的按格识别状态机，使用 `/current_grid` 触发稳定/统计时间窗，按单帧最大数去除跨帧重复，已扫描格不重复上报 | Python 编译、ROS 手动 `/current_grid` 触发和状态转换验证通过 | 真实自动触发仍需后续定位节点发布 `/current_grid`；本功能不控制飞控。
+- 2026-07-16 | `feature/route-optimization` | 将固定蛇形顺序改为多候选覆盖顺序 + 四邻域 A* 连接，从 `A9,B1` 红点出发并返回；同步修正 LandScreen 按缩放后像素尺寸绘制航线 | Python 编译、Qt CMake 构建、双机 TCP/ROS/UI 闭环通过；无禁飞区 77→65 点，3 个竖直禁飞格 85→61 点 | 仍是固定 9×7 静态格，不处理动态障碍。
 - 2026-07-15 | `feature/real-yolo` | 修复覆盖路径删除禁飞航点后仍用直线穿越禁飞格的问题，使用自由网格 BFS 绕行并在 LandScreen 标记禁飞格 | Python 约束检查通过；双机生成 69 点路径、覆盖 60 个自由格、禁飞格访问为 0、Qt 两次完成 69 点重绘 | 仍是固定 9×7 静态网格，不处理动态障碍。
 - 2026-07-15 | `feature/real-yolo` | 接入 USB Camera + `yolo_trt_ros` 检测适配和集成启动，并让 LandScreen 支持运行时服务器地址 | 两台 Ubuntu Python/XML 检查与 `catkin_make`、Qt 构建、模拟 `vision_msgs -> TCP -> UI` 通过；真实 `/dev/video0` 原图与带框图约 30 Hz | 空场景检测与通信正常，真实动物正样本识别尚待验证。
 - 2026-07-15 | `feature/fc-bridge` | 在真实双机环境部署飞控遥测桥，验证地面 `/planner/path` 到机载回执，并尝试 CP2102N 串口 MAVROS | 两台 Ubuntu `catkin_make` 通过；60 点路径回执成功；MAVROS 可打开 `/dev/ttyUSB0` | `57600/115200/460800/921600` 原始串口输入均为 0，待检查 PX4 `TELEM2` 接线、供电和 MAVLink 参数。

@@ -53,9 +53,21 @@ cd LandScreen-master/build
 LANDSCREEN_SERVER_IP=127.0.0.1 LANDSCREEN_SERVER_PORT=8001 ./planescreen
 ```
 
-The fake server listens on `127.0.0.1:8001`. The original source default is still `192.168.10.3:8001`, but you can override it with `LANDSCREEN_SERVER_IP` and `LANDSCREEN_SERVER_PORT`.
+The fake server and source fallback both use `127.0.0.1:8001`. Use the in-app **连接设置** dialog to save the real onboard IP and port. `LANDSCREEN_SERVER_IP` and `LANDSCREEN_SERVER_PORT` only provide initial defaults when no saved setting exists.
 
-## 4. Real onboard protocol
+## 4. Install the desktop shortcut
+
+After building the UI, run:
+
+```bash
+cd LandScreen-master
+chmod +x tools/install_desktop_shortcut.sh
+./tools/install_desktop_shortcut.sh
+```
+
+The generated launcher prevents duplicate `planescreen` instances and uses the current repository path rather than a hard-coded home directory.
+
+## 5. Real onboard protocol
 
 The onboard side should listen on TCP port `8001`, receive ground JSON lines, and send JSON lines back.
 

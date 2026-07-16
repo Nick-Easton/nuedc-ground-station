@@ -11,11 +11,7 @@
   <arg name="max_rate" default="5.0"/>
   <arg name="max_detections" default="10"/>
 
-  <include file="$(find nuedc_ground_air)/launch/onboard_landscreen_demo.launch">
-    <arg name="use_fake_yolo" value="false"/>
-  </include>
-
-  <include file="$(find yolo_trt_ros)/launch/yolo_trt_usb_cam.launch" if="$(arg start_yolo)">
+  <include if="$(arg start_yolo)" file="$(find yolo_trt_ros)/launch/yolo_trt_usb_cam.launch">
     <arg name="camera" value="$(arg camera)"/>
     <arg name="image_width" value="$(arg image_width)"/>
     <arg name="image_height" value="$(arg image_height)"/>
