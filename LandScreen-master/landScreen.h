@@ -74,6 +74,7 @@ private:
     // Socket相关
     QTcpSocket *socket = nullptr;
     QTimer *reconnectTimer = nullptr;
+    QTimer *planningTimer = nullptr;
     QString serverIp;
     quint16 serverPort = SERVER_PORT;
     QJsonObject dataSend;
@@ -82,6 +83,7 @@ private:
     std::vector<Target> targets;
     std::vector<Point> wayPoints;
     bool routeReady = false;
+    bool planningRequestActive = false;
     QString resultsFilePath;
     QSet<QString> savedGridResultSignatures;
     void CreateUI();
@@ -93,7 +95,8 @@ private:
     void onSendClicked();
     void onCancelClicked();
     void parseJson(const QByteArray &jsonData);
-    void sendData();
+    bool sendData();
+    void resetPlanningState(const QString &buttonText, bool clearRoute);
     void initSocket();
     void loadConnectionSettings();
     void showConnectionSettings();

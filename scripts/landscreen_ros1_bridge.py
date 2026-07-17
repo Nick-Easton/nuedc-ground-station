@@ -35,14 +35,20 @@ class LandScreenRos1Bridge:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((self.host, self.port))
         server.listen(4)
+        server.settimeout(1.0)
         rospy.loginfo("LandScreen ROS1 bridge listening on %s:%d", self.host, self.port)
 
         while not rospy.is_shutdown():
             try:
                 client, address = server.accept()
-            except OSError:
+            except socket.timeout:
+                continue
+            except OSError as exc:
+                if not rospy.is_shutdown():
+                    rospy.logwarn("LandScreen accept failed: %s", exc)
                 break
 
+            client.settimeout(1.0)
             rospy.loginfo("LandScreen client connected: %s:%d", address[0], address[1])
             with self.clients_lock:
                 self.clients.append(client)
@@ -54,7 +60,10 @@ class LandScreenRos1Bridge:
         buffer = b""
         try:
             while not rospy.is_shutdown():
-                data = client.recv(4096)
+                try:
+                    data = client.recv(4096)
+                except socket.timeout:
+                    continue
                 if not data:
                     break
                 buffer += data

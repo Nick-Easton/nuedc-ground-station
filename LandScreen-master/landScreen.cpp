@@ -73,6 +73,15 @@ LandScreen::LandScreen(QWidget *parent) : QWidget(parent)
     // 信号与槽连接
     connect(this, &LandScreen::wayPointsReady, this, &LandScreen::drawOnMap);
 
+    planningTimer = new QTimer(this);
+    planningTimer->setSingleShot(true);
+    connect(planningTimer, &QTimer::timeout, this, [this]() {
+        if (!planningRequestActive)
+            return;
+        resetPlanningState(QStringLiteral("规划超时，请重试"), true);
+        qWarning() << "Route planning timed out without a path response.";
+    });
+
 }
 
 LandScreen::~LandScreen()
@@ -199,6 +208,9 @@ void LandScreen::initSocket()
             reconnectTimer->start();
             updateConnectionStatus(QStringLiteral("未连接"));
         }
+
+        if (planningRequestActive)
+            resetPlanningState(QStringLiteral("连接已断开"), true);
 
     });
 
@@ -706,9 +718,23 @@ void LandScreen::onSendClicked()
 {
     qDebug() << "发送按钮被点击";
 
+    if (!socket || socket->state() != QAbstractSocket::ConnectedState) {
+        resetPlanningState(QStringLiteral("未连接机载电脑"), false);
+        QMessageBox::warning(
+            this, QStringLiteral("无法规划"),
+            QStringLiteral("地面站尚未连接机载电脑，请先检查连接设置和 TCP 8001。")
+        );
+        return;
+    }
+
     // 从三个标签中提取AB数字
     QLabel* labels[] = {labelF1, labelF2, labelF3};
     QString keys[] = {"f1", "f2", "f3"};
+
+    for (int i = 0; i < 3; ++i) {
+        dataSend[keys[i] + "x"] = -1;
+        dataSend[keys[i] + "y"] = -1;
+    }
 
     for (int i = 0; i < 3; i++) {
         QString text = labels[i]->text();
@@ -719,6 +745,14 @@ void LandScreen::onSendClicked()
             if (match.hasMatch()) {
                 int aValue = match.captured(1).toInt();
                 int bValue = match.captured(2).toInt();
+                if (aValue == 9 && bValue == 1) {
+                    resetPlanningState(QStringLiteral("起降点不可禁飞"), true);
+                    QMessageBox::warning(
+                        this, QStringLiteral("禁飞区无效"),
+                        QStringLiteral("A9B1 是无人机起降点，不能设置为禁飞区。")
+                    );
+                    return;
+                }
                 dataSend[keys[i] + "x"] = aValue;
                 dataSend[keys[i] + "y"] = bValue;
                 qDebug() << "提取" << keys[i] << ": A=" << aValue << ", B=" << bValue;
@@ -728,9 +762,14 @@ void LandScreen::onSendClicked()
 
     dataSend["launch"] = false;
     routeReady = false;
+    planningRequestActive = true;
+    wayPoints.clear();
+    emit wayPointsReady();
     launchButton->setEnabled(false);
-    launchButton->setText("航线规划中...");
-    sendData();
+    launchButton->setText(QStringLiteral("航线规划中..."));
+    planningTimer->start(10000);
+    if (!sendData())
+        resetPlanningState(QStringLiteral("发送失败，请重试"), true);
 }
 
 void LandScreen::onCancelClicked()
@@ -742,7 +781,37 @@ void LandScreen::onCancelClicked()
     labelF2->setText("NULL");
     labelF3->setText("NULL");
 
+    for (int index = 1; index <= 3; ++index) {
+        dataSend[QString("f%1x").arg(index)] = -1;
+        dataSend[QString("f%1y").arg(index)] = -1;
+    }
+    dataSend["launch"] = false;
+
+    selectedButtonA = -1;
+    selectedButtonB = -1;
+    updateButtonAStyles();
+    updateButtonBStyles();
+    resetPlanningState(QStringLiteral("启动识别"), true);
+
     qDebug() << "所有标签已重置为NULL";
+}
+
+void LandScreen::resetPlanningState(const QString &buttonText, bool clearRoute)
+{
+    planningRequestActive = false;
+    if (planningTimer)
+        planningTimer->stop();
+
+    routeReady = false;
+    if (launchButton) {
+        launchButton->setEnabled(false);
+        launchButton->setText(buttonText);
+    }
+
+    if (clearRoute) {
+        wayPoints.clear();
+        emit wayPointsReady();
+    }
 }
 
 void LandScreen::parseJson(const QByteArray &jsonData)
@@ -861,6 +930,13 @@ void LandScreen::parseJson(const QByteArray &jsonData)
         return;
     }
 
+    if (obj.contains("planner") && obj["planner"].isArray() &&
+        !obj["planner"].toArray().isEmpty() &&
+        !planningRequestActive && !routeReady) {
+        qDebug() << "Ignoring a route received after planning was cancelled or timed out.";
+        return;
+    }
+
     if (obj.contains("forbidden") && obj["forbidden"].isArray()) {
         QLabel *forbiddenLabels[] = {labelF1, labelF2, labelF3};
         for (int index = 0; index < 3; ++index) {
@@ -893,8 +969,11 @@ void LandScreen::parseJson(const QByteArray &jsonData)
     }
 
     QJsonArray plannerArray = obj["planner"].toArray();
-    if (!plannerArray.isEmpty()) {
-        wayPoints.clear();
+    if (plannerArray.isEmpty()) {
+        if (planningRequestActive)
+            resetPlanningState(QStringLiteral("规划失败，请检查禁飞区"), true);
+    } else {
+        std::vector<Point> parsedWayPoints;
         for (const QJsonValue &val : plannerArray) {
             if (!val.isObject()) continue;
             QJsonObject pointObj = val.toObject();
@@ -904,14 +983,25 @@ void LandScreen::parseJson(const QByteArray &jsonData)
                 Point pt;
                 pt.a = static_cast<qint8>(9 - std::round(y / 0.5));
                 pt.b = static_cast<qint8>(std::round(x / 0.5) + 1);
+                if (pt.a < 1 || pt.a > 9 || pt.b < 1 || pt.b > 7)
+                    continue;
                 qDebug() << "a:" << pt.a << "b:" << pt.b;
-                wayPoints.push_back(pt);
+                parsedWayPoints.push_back(pt);
             }
         }
-        emit wayPointsReady();
-        routeReady = !wayPoints.empty();
-        launchButton->setEnabled(routeReady);
-        launchButton->setText(routeReady ? "启动识别" : "无可用航线");
+
+        if (parsedWayPoints.empty()) {
+            resetPlanningState(QStringLiteral("无可用航线"), true);
+        } else {
+            wayPoints.swap(parsedWayPoints);
+            planningRequestActive = false;
+            if (planningTimer)
+                planningTimer->stop();
+            routeReady = true;
+            launchButton->setEnabled(true);
+            launchButton->setText(QStringLiteral("启动识别"));
+            emit wayPointsReady();
+        }
     }
     SharedData& data = SharedData::getInstance();
     Target& receivedTarget = data.getChosenTarget();
@@ -953,23 +1043,28 @@ void LandScreen::ReadData()
     }
 }
 
-void LandScreen::sendData()
+bool LandScreen::sendData()
 {
     if (socket && socket->state() == QAbstractSocket::ConnectedState) {
         QJsonDocument doc(dataSend);
         QByteArray jsonData = doc.toJson(QJsonDocument::Compact);
         jsonData.append("\n");
-        socket->write(jsonData);
+        if (socket->write(jsonData) < 0) {
+            qWarning() << "Socket write failed:" << socket->errorString();
+            return false;
+        }
         qDebug() << "LandScreen sent data:" << jsonData;
+        return true;
     } else {
         qDebug() << "Socket not connected, cannot send data";
+        return false;
     }
 }
 
 // 自定义槽函数实现
 void LandScreen::drawOnMap()
 {
-    if (originalMapPixmap.isNull() || wayPoints.empty()) {
+    if (originalMapPixmap.isNull()) {
         return;
     }
 

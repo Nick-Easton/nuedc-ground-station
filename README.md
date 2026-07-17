@@ -101,6 +101,20 @@ chmod +x src/nuedc_ground_air/scripts/*.py
 roslaunch nuedc_ground_air landscreen_ros1_bridge.launch camera:=/dev/video0
 ```
 
+需要在 NX 用户登录后自动启动并在异常退出时自动重启时，安装用户级服务：
+
+```bash
+cd ~/catkin_ws/src/nuedc_ground_air
+bash tools/install_onboard_user_service.sh
+```
+
+检查和重启服务：
+
+```bash
+systemctl --user status nuedc-ground-stack.service
+systemctl --user restart nuedc-ground-stack.service
+```
+
 在 Qt 地面站电脑上执行：
 
 ```bash
@@ -109,6 +123,8 @@ cd ~/LandScreen-master/build
 ```
 
 首次启动时在 UI 右下角“连接设置”填写 NX 的 IP 和端口 8001；配置由 `QSettings` 保存，修改 IP 不需要重新编译。也可以用 `LANDSCREEN_SERVER_IP` 和 `LANDSCREEN_SERVER_PORT` 提供首次默认值。
+
+连接设置中的端口必须是 TCP 桥的 `8001`，不能填写 NoMachine 的 `4000`。发送规划请求后，UI 会在断线、发送失败、空路径或 10 秒超时时退出“航线规划中”；点击“取消”会同步清空禁飞数据、旧航线和规划状态。TCP 桥会忽略空闲 socket 超时并继续监听，不再因 60 秒无新连接或无数据而退出。
 
 集成 launch 同时启动 TCP 桥、路径规划、路径校验、视觉消息转换、按格识别状态机和视觉启动器。桥接节点接收 LandScreen 发来的禁区 JSON，并发布到 `/mission/forbidden_zones`。当 `launch=true` 时，它会向 `/mission/command` 发送 `START`；摄像头与 YOLO 在此时启动，规划路径和按格识别结果自动回传 UI。
 

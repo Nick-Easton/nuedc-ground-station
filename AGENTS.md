@@ -43,6 +43,7 @@
 | `LandScreen-master/` | Qt 地图界面和本地假服务器。可执行文件名为 `planescreen`。 |
 | `launch/` | ROS 1 启动文件。 |
 | `msg/` | ROS 1 自定义消息。修改后必须重新运行 `catkin_make`。 |
+| `systemd/`、`tools/install_onboard_user_service.sh` | NX 用户级一体化服务及安装脚本；用于登录后自动启动和异常重启。 |
 
 ## 路径规划链路
 
@@ -219,6 +220,7 @@ YYYY-MM-DD | 作者/分支 | 变更摘要 | 已执行的验证 | 已知问题
 
 当前记录：
 
+- 2026-07-17 | `feature/real-yolo` | 修复 Qt 规划状态无法取消/失败不复位、桥空闲约 60 秒退出和 NX 一体化 launch 未部署的问题；新增用户级自动启动服务 | Nano Qt 构建、NX catkin_make、桥持续运行且无重启、TCP 三禁区返回 63 点路径通过 | 手机热点实测平均延迟约 600-825 ms 且有丢包，NoMachine 交互仍受网络质量限制。
 - 2026-07-16 | `feature/real-yolo` | 合并 `agent/contest-ground-station-integration`，保留真实 YOLO 参数、只读 MAVROS 参数和禁飞格覆盖层，并接入 A* 闭合覆盖、按格识别、CSV 与连接设置 | Python 编译、launch/package XML、Git 空白和代表性路径约束检查通过 | 当前无法通过 SSH 登录 Jetson，尚未对合并结果重新执行 catkin_make 和 Qt 构建。
 - 2026-07-16 | `agent/contest-ground-station-integration` | 汇总比赛参数、A* 闭合覆盖、真实 YOLO、按格识别、五类目标页、CSV、运行时连接设置、桌面快捷方式和一体化 NX launch | Python/XML/路径约束检查；此前已在 Jetson 完成 catkin_make、Qt CMake 构建、TCP/UI、`z=1.2` 和手动 `/current_grid` 验证 | 当前 NX 暂时离线；未修改飞控控制，路径执行、定位和激光仍待飞控负责人完成。
 - 2026-07-16 | `feature/connection-settings` | LandScreen 新增可持久保存的 NX IP/端口设置页，保存后立即重连；新增相对路径桌面快捷方式安装脚本 | Qt CMake 构建并在 Nano 截图验证连接状态与设置按钮 | 网络不互通时仍无法请求 NX 上的规划器。
