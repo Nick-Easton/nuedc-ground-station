@@ -29,12 +29,16 @@ catkin_package(
 )
 
 catkin_install_python(PROGRAMS
+  scripts/fc_state_bridge.py
   scripts/fake_yolo_node.py
   scripts/ground_path_planner.py
+  scripts/grid_recognition_state_machine.py
   scripts/ground_station_gui.py
   scripts/landscreen_ros1_bridge.py
   scripts/ground_station_cli.py
   scripts/mission_node.py
   scripts/onboard_path_receiver.py
+  scripts/vision_detection_adapter.py
+  scripts/vision_start_on_command.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

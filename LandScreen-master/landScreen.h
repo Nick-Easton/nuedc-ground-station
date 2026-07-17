@@ -8,6 +8,7 @@
 #include <QPushButton>
 #include <QTcpSocket>
 #include <QTimer>
+#include <QSet>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QDebug>
@@ -15,7 +16,7 @@
 #include"plane_targets.h"
 #include"QJsonArray"
 #include"TargetInfo.h"
-#define SERVER_IP "192.168.10.3"
+#define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 8001
 #define OFFSET_X 0.25
 #define OFFSET_Y 0.25
@@ -53,6 +54,7 @@ private:
     QLabel *labelF2 = nullptr;
     QLabel *labelF3 = nullptr;
     QLabel* connectStatusLabel = nullptr; // 新增：连接状态标签
+    QPushButton *connectionSettingsButton = nullptr;
 
     // 发送和取消按钮
     QPushButton *sendButton = nullptr;
@@ -72,11 +74,19 @@ private:
     // Socket相关
     QTcpSocket *socket = nullptr;
     QTimer *reconnectTimer = nullptr;
+    QTimer *planningTimer = nullptr;
+    QString serverIp;
+    quint16 serverPort = SERVER_PORT;
     QJsonObject dataSend;
 
     Target receivedTarget = {-1,-1,"NULL"};
     std::vector<Target> targets;
     std::vector<Point> wayPoints;
+    bool routeReady = false;
+    bool planningRequestActive = false;
+    QString resultsFilePath;
+    QSet<QString> savedGridResultSignatures;
+    bool hasGridResults = false;
     void CreateUI();
     void onButtonAClicked(int index);
     void onButtonBClicked(int index);
@@ -86,8 +96,13 @@ private:
     void onSendClicked();
     void onCancelClicked();
     void parseJson(const QByteArray &jsonData);
-    void sendData();
+    bool sendData();
+    void resetPlanningState(const QString &buttonText, bool clearRoute);
     void initSocket();
+    void loadConnectionSettings();
+    void showConnectionSettings();
+    void reconnectToServer();
+    void updateConnectionStatus(const QString &status);
     void updateTargetSummaryLabel(); // 新增：更新目标汇总标签
 };
 

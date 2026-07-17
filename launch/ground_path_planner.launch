@@ -1,5 +1,5 @@
 <launch>
-  <arg name="altitude" default="2.0"/>
+  <arg name="altitude" default="1.2"/>
   <arg name="grid_spacing" default="0.5"/>
 
   <node pkg="nuedc_ground_air" type="ground_path_planner.py" name="ground_path_planner" output="screen">

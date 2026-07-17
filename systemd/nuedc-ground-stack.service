@@ -1,0 +1,14 @@
+[Unit]
+Description=NUEDC ROS1 ground-air integration stack
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -lc 'source /opt/ros/noetic/setup.bash && source %h/catkin_ws_yolo_trt/devel/setup.bash && source %h/catkin_ws/devel/setup.bash && exec roslaunch nuedc_ground_air landscreen_ros1_bridge.launch camera:=/dev/video0'
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target

@@ -12,6 +12,21 @@
 #include <cmath>
 #include<QRegularExpression>
 #include<QMessageBox>
+#include <QCoreApplication>
+#include <QDateTime>
+#include <QFile>
+#include <QTextStream>
+#include <QSettings>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QLineEdit>
+#include <QSpinBox>
+#include <QHostAddress>
+#include <QtGlobal>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#include <QStringConverter>
+#endif
 
 namespace {
 QString landscreenServerIp()
@@ -26,10 +41,25 @@ quint16 landscreenServerPort()
     quint16 port = qgetenv("LANDSCREEN_SERVER_PORT").toUShort(&ok);
     return ok ? port : static_cast<quint16>(SERVER_PORT);
 }
+
+QString mapImagePath()
+{
+    return QCoreApplication::applicationDirPath() + QStringLiteral("/../map.png");
+}
+
+void setUtf8Encoding(QTextStream &stream)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    stream.setEncoding(QStringConverter::Utf8);
+#else
+    stream.setCodec("UTF-8");
+#endif
+}
 }
 
 LandScreen::LandScreen(QWidget *parent) : QWidget(parent)
 {
+    loadConnectionSettings();
     CreateUI();
     initSocket();
     dataSend["f1x"] = -1;
@@ -43,6 +73,15 @@ LandScreen::LandScreen(QWidget *parent) : QWidget(parent)
     // 信号与槽连接
     connect(this, &LandScreen::wayPointsReady, this, &LandScreen::drawOnMap);
 
+    planningTimer = new QTimer(this);
+    planningTimer->setSingleShot(true);
+    connect(planningTimer, &QTimer::timeout, this, [this]() {
+        if (!planningRequestActive)
+            return;
+        resetPlanningState(QStringLiteral("规划超时，请重试"), true);
+        qWarning() << "Route planning timed out without a path response.";
+    });
+
 }
 
 LandScreen::~LandScreen()
@@ -50,15 +89,115 @@ LandScreen::~LandScreen()
     // 析构函数实现  if(wayPoints.empty()){
 }
 
+void LandScreen::loadConnectionSettings()
+{
+    QSettings settings(QStringLiteral("NUEDC"), QStringLiteral("LandScreen"));
+    serverIp = settings.value(QStringLiteral("connection/server_ip"),
+                              landscreenServerIp()).toString().trimmed();
+    const int configuredPort = settings.value(
+        QStringLiteral("connection/server_port"), landscreenServerPort()).toInt();
+    serverPort = configuredPort > 0 && configuredPort <= 65535
+        ? static_cast<quint16>(configuredPort)
+        : static_cast<quint16>(SERVER_PORT);
+}
+
+void LandScreen::updateConnectionStatus(const QString &status)
+{
+    if (connectStatusLabel) {
+        connectStatusLabel->setText(
+            QStringLiteral("%1  %2:%3").arg(status, serverIp).arg(serverPort));
+    }
+}
+
+void LandScreen::reconnectToServer()
+{
+    if (!socket)
+        return;
+
+    socket->abort();
+    updateConnectionStatus(QStringLiteral("连接中"));
+    socket->connectToHost(serverIp, serverPort);
+    if (reconnectTimer && !reconnectTimer->isActive())
+        reconnectTimer->start();
+}
+
+void LandScreen::showConnectionSettings()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("机载电脑连接设置"));
+    dialog.setMinimumWidth(460);
+
+    QVBoxLayout *layout = new QVBoxLayout(&dialog);
+    QLabel *hint = new QLabel(
+        QStringLiteral("请输入机载电脑 NX 的 IP 地址。保存后将立即按新地址重新连接。"),
+        &dialog);
+    hint->setWordWrap(true);
+    hint->setStyleSheet(QStringLiteral("font-size: 16px; color: #333; padding: 6px;"));
+    layout->addWidget(hint);
+
+    QFormLayout *form = new QFormLayout();
+    QLineEdit *ipEdit = new QLineEdit(serverIp, &dialog);
+    ipEdit->setPlaceholderText(QStringLiteral("例如：192.168.1.20"));
+    ipEdit->setMinimumHeight(42);
+    ipEdit->setStyleSheet(QStringLiteral("font-size: 18px; padding: 4px;"));
+
+    QSpinBox *portEdit = new QSpinBox(&dialog);
+    portEdit->setRange(1, 65535);
+    portEdit->setValue(serverPort);
+    portEdit->setMinimumHeight(42);
+    portEdit->setStyleSheet(QStringLiteral("font-size: 18px; padding: 4px;"));
+
+    form->addRow(QStringLiteral("机载电脑 IP："), ipEdit);
+    form->addRow(QStringLiteral("通信端口："), portEdit);
+    layout->addLayout(form);
+
+    QLabel *current = new QLabel(
+        QStringLiteral("当前连接：%1:%2").arg(serverIp).arg(serverPort), &dialog);
+    current->setStyleSheet(QStringLiteral("font-size: 15px; color: #666; padding: 6px;"));
+    layout->addWidget(current);
+
+    QDialogButtonBox *buttons = new QDialogButtonBox(
+        QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Save)->setText(QStringLiteral("保存并重新连接"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    buttons->setStyleSheet(QStringLiteral(
+        "QPushButton { min-height: 40px; min-width: 120px; font-size: 16px; }"));
+    layout->addWidget(buttons);
+
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, [&]() {
+        const QString newIp = ipEdit->text().trimmed();
+        QHostAddress address;
+        if (!address.setAddress(newIp) ||
+            address.protocol() != QAbstractSocket::IPv4Protocol) {
+            QMessageBox::warning(
+                &dialog, QStringLiteral("IP 地址无效"),
+                QStringLiteral("请输入正确的 IPv4 地址，例如 192.168.1.20。"));
+            return;
+        }
+
+        serverIp = newIp;
+        serverPort = static_cast<quint16>(portEdit->value());
+        QSettings settings(QStringLiteral("NUEDC"), QStringLiteral("LandScreen"));
+        settings.setValue(QStringLiteral("connection/server_ip"), serverIp);
+        settings.setValue(QStringLiteral("connection/server_port"), serverPort);
+        settings.sync();
+        dialog.accept();
+    });
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (dialog.exec() == QDialog::Accepted)
+        reconnectToServer();
+}
+
 void LandScreen::initSocket()
 {
     socket = new QTcpSocket(this);
     reconnectTimer = new QTimer(this);
-    reconnectTimer->setInterval(500); // 每0.5秒重试一次
+    reconnectTimer->setInterval(1000);
 
     connect(socket, &QTcpSocket::connected, this, [this]{
         qDebug() << "Connected to server";
-        connectStatusLabel->setText("已连接");
+        updateConnectionStatus(QStringLiteral("已连接"));
         reconnectTimer->stop(); // 连接上了就停止重连
     });
 
@@ -67,8 +206,11 @@ void LandScreen::initSocket()
         if (!reconnectTimer->isActive())
         {
             reconnectTimer->start();
-            connectStatusLabel->setText("已断开");
+            updateConnectionStatus(QStringLiteral("未连接"));
         }
+
+        if (planningRequestActive)
+            resetPlanningState(QStringLiteral("连接已断开"), true);
 
     });
 
@@ -77,13 +219,13 @@ void LandScreen::initSocket()
     connect(reconnectTimer, &QTimer::timeout, this, [this]{
         if (socket->state() == QAbstractSocket::UnconnectedState) {
             socket->abort(); // 清理旧连接
-            socket->connectToHost(SERVER_IP, SERVER_PORT);
-            socket->connectToHost(landscreenServerIp(), landscreenServerPort());
+            socket->connectToHost(serverIp, serverPort);
             qDebug() << "LandScreen socket reconnecting...";
         }
     });
 
-    socket->connectToHost(landscreenServerIp(), landscreenServerPort());
+    updateConnectionStatus(QStringLiteral("连接中"));
+    socket->connectToHost(serverIp, serverPort);
     reconnectTimer->start();
 }
 
@@ -102,12 +244,12 @@ void LandScreen::CreateUI()
 
     // 创建地图显示区域
     mapLabel = new QLabel(topWidget);
-    mapLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    mapLabel->setAlignment(Qt::AlignCenter);
     // 图片区域保持固定尺寸
     mapLabel->setFixedSize(525, 495);
 
     // 加载地图图片
-    originalMapPixmap = QPixmap("../map.png");
+    originalMapPixmap = QPixmap(mapImagePath());
 
     if (originalMapPixmap.isNull()) {
         qWarning() << "无法加载地图文件: ../map.png";
@@ -116,14 +258,15 @@ void LandScreen::CreateUI()
         mapLabel->setFixedSize(525, 495);
     } else {
         // 按比例缩放地图
-        QPixmap scaledPixmap = originalMapPixmap.scaled(360, 280, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        QPixmap scaledPixmap = originalMapPixmap.scaledToWidth(620, Qt::SmoothTransformation);
         mapLabel->setPixmap(scaledPixmap);
-        mapLabel->setFixedSize(360, 280);
+        mapLabel->setFixedSize(scaledPixmap.size());
         mapLabel->setScaledContents(false);
     }
 
     // 创建右上角标签区域
     QWidget *rightTopWidget = new QWidget(topWidget);
+    rightTopWidget->setMinimumWidth(480);
     QVBoxLayout *rightTopLayout = new QVBoxLayout(rightTopWidget);
     rightTopLayout->setAlignment(Qt::AlignTop | Qt::AlignRight);
     rightTopLayout->setSpacing(10);
@@ -187,7 +330,8 @@ void LandScreen::CreateUI()
     QHBoxLayout *buttonLayout = new QHBoxLayout(buttonWidget);
     buttonLayout->setSpacing(20);
     buttonLayout->setContentsMargins(0, 10, 0, 0);
-    launchButton = new QPushButton("启动", buttonWidget);
+    launchButton = new QPushButton("启动识别", buttonWidget);
+    launchButton->setEnabled(false);
     launchButton->setMinimumSize(80, 40); // 只设置最小
     launchButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     launchButton->setStyleSheet(
@@ -255,18 +399,36 @@ void LandScreen::CreateUI()
         onCancelClicked();
     });
     connect(launchButton, &QPushButton::clicked, [this]() {
-        dataSend["launch"] = true;
-        if(dataSend["f1x"] == -1 && dataSend["f2x"] == -1 && dataSend["f3x"] == -1){
-            QMessageBox::warning(this, "警告", "没有禁飞区信息，无法启动");
+        if (dataSend.value("launch").toBool(false)) {
+            dataSend["launch"] = false;
+            if (!sendData()) {
+                dataSend["launch"] = true;
+                QMessageBox::warning(this, QStringLiteral("停止失败"),
+                                     QStringLiteral("未能向机载电脑发送停止识别命令。"));
+                return;
+            }
+            launchButton->setText(QStringLiteral("启动识别"));
+            launchButton->setEnabled(routeReady);
             return;
         }
-        sendData();
+        if (!routeReady) {
+            QMessageBox::information(this, "请先规划", "请先发送禁飞区并等待地图显示规划航线。");
+            return;
+        }
+        dataSend["launch"] = true;
+        if (!sendData()) {
+            dataSend["launch"] = false;
+            QMessageBox::warning(this, QStringLiteral("启动失败"),
+                                 QStringLiteral("未能向机载电脑发送启动识别命令。"));
+            return;
+        }
+        launchButton->setText(QStringLiteral("停止识别"));
+        launchButton->setEnabled(true);
     });
 
-    buttonLayout->addWidget(sendButton);
-    buttonLayout->addWidget(cancelButton);
-    buttonLayout->addStretch();
-    buttonLayout->addWidget(launchButton);
+    buttonLayout->addWidget(sendButton, 1);
+    buttonLayout->addWidget(cancelButton, 1);
+    buttonLayout->addWidget(launchButton, 1);
 
     rightTopLayout->addWidget(buttonWidget);
     rightTopLayout->addStretch(); // 向下推送
@@ -393,8 +555,25 @@ void LandScreen::CreateUI()
         targetInfoDialog->activateWindow();
     });
 
+    connectionSettingsButton = new QPushButton(QStringLiteral("连接设置"), bottomWidget);
+    connectionSettingsButton->setMinimumSize(110, 40);
+    connectionSettingsButton->setStyleSheet(
+        "QPushButton {"
+        "    background-color: #5f6b7a;"
+        "    color: white;"
+        "    font-size: 16px;"
+        "    font-weight: bold;"
+        "    border-radius: 5px;"
+        "    padding: 6px 12px;"
+        "}"
+        "QPushButton:hover { background-color: #46515f; }"
+    );
+    connect(connectionSettingsButton, &QPushButton::clicked,
+            this, &LandScreen::showConnectionSettings);
+
     summaryLayout->addWidget(labelTargetSummary);
     summaryLayout->addWidget(connectStatusLabel);
+    summaryLayout->addWidget(connectionSettingsButton);
     summaryLayout->addWidget(showTargetInfoButton);
 
     bottomLayout->addLayout(summaryLayout); // 添加到下方布局
@@ -556,9 +735,23 @@ void LandScreen::onSendClicked()
 {
     qDebug() << "发送按钮被点击";
 
+    if (!socket || socket->state() != QAbstractSocket::ConnectedState) {
+        resetPlanningState(QStringLiteral("未连接机载电脑"), false);
+        QMessageBox::warning(
+            this, QStringLiteral("无法规划"),
+            QStringLiteral("地面站尚未连接机载电脑，请先检查连接设置和 TCP 8001。")
+        );
+        return;
+    }
+
     // 从三个标签中提取AB数字
     QLabel* labels[] = {labelF1, labelF2, labelF3};
     QString keys[] = {"f1", "f2", "f3"};
+
+    for (int i = 0; i < 3; ++i) {
+        dataSend[keys[i] + "x"] = -1;
+        dataSend[keys[i] + "y"] = -1;
+    }
 
     for (int i = 0; i < 3; i++) {
         QString text = labels[i]->text();
@@ -569,6 +762,14 @@ void LandScreen::onSendClicked()
             if (match.hasMatch()) {
                 int aValue = match.captured(1).toInt();
                 int bValue = match.captured(2).toInt();
+                if (aValue == 9 && bValue == 1) {
+                    resetPlanningState(QStringLiteral("起降点不可禁飞"), true);
+                    QMessageBox::warning(
+                        this, QStringLiteral("禁飞区无效"),
+                        QStringLiteral("A9B1 是无人机起降点，不能设置为禁飞区。")
+                    );
+                    return;
+                }
                 dataSend[keys[i] + "x"] = aValue;
                 dataSend[keys[i] + "y"] = bValue;
                 qDebug() << "提取" << keys[i] << ": A=" << aValue << ", B=" << bValue;
@@ -576,7 +777,16 @@ void LandScreen::onSendClicked()
         }
     }
 
-    sendData();
+    dataSend["launch"] = false;
+    routeReady = false;
+    planningRequestActive = true;
+    wayPoints.clear();
+    emit wayPointsReady();
+    launchButton->setEnabled(false);
+    launchButton->setText(QStringLiteral("航线规划中..."));
+    planningTimer->start(10000);
+    if (!sendData())
+        resetPlanningState(QStringLiteral("发送失败，请重试"), true);
 }
 
 void LandScreen::onCancelClicked()
@@ -588,7 +798,38 @@ void LandScreen::onCancelClicked()
     labelF2->setText("NULL");
     labelF3->setText("NULL");
 
+    for (int index = 1; index <= 3; ++index) {
+        dataSend[QString("f%1x").arg(index)] = -1;
+        dataSend[QString("f%1y").arg(index)] = -1;
+    }
+    dataSend["launch"] = false;
+    sendData();
+
+    selectedButtonA = -1;
+    selectedButtonB = -1;
+    updateButtonAStyles();
+    updateButtonBStyles();
+    resetPlanningState(QStringLiteral("启动识别"), true);
+
     qDebug() << "所有标签已重置为NULL";
+}
+
+void LandScreen::resetPlanningState(const QString &buttonText, bool clearRoute)
+{
+    planningRequestActive = false;
+    if (planningTimer)
+        planningTimer->stop();
+
+    routeReady = false;
+    if (launchButton) {
+        launchButton->setEnabled(false);
+        launchButton->setText(buttonText);
+    }
+
+    if (clearRoute) {
+        wayPoints.clear();
+        emit wayPointsReady();
+    }
 }
 
 void LandScreen::parseJson(const QByteArray &jsonData)
@@ -602,14 +843,211 @@ void LandScreen::parseJson(const QByteArray &jsonData)
     }
 
     QJsonObject obj = doc.object();
+    if (obj.value("reset_targets").toBool(false)) {
+        SharedData &sharedData = SharedData::getInstance();
+        {
+            std::lock_guard<std::mutex> lock(sharedData.getMutex());
+            sharedData.getTargets().clear();
+            Target &chosen = sharedData.getChosenTarget();
+            chosen = {-1, -1, "NULL"};
+        }
+        savedGridResultSignatures.clear();
+        hasGridResults = false;
+        resultsFilePath = QCoreApplication::applicationDirPath()
+            + QString("/../animal_results_%1.csv")
+                  .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+        QFile resultFile(resultsFilePath);
+        if (resultFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QTextStream stream(&resultFile);
+            setUtf8Encoding(stream);
+            stream << "timestamp,grid,animal,count\n";
+        }
+        updateTargetSummaryLabel();
+    }
+
+    if (obj.contains("vision_summary") && obj["vision_summary"].isObject()) {
+        if (hasGridResults)
+            return;
+
+        const QJsonObject summary = obj["vision_summary"].toObject();
+        const QJsonObject counts = summary.value("counts").toObject();
+        const QStringList classNames = {
+            "elephant", "tiger", "monkey", "kongque", "wolf"
+        };
+
+        SharedData &sharedData = SharedData::getInstance();
+        {
+            std::lock_guard<std::mutex> lock(sharedData.getMutex());
+            std::vector<Target> &targets = sharedData.getTargets();
+            targets.erase(
+                std::remove_if(
+                    targets.begin(), targets.end(),
+                    [](const Target &target) {
+                        return target.a < 1 || target.b < 1;
+                    }
+                ),
+                targets.end()
+            );
+
+            Target &chosen = sharedData.getChosenTarget();
+            chosen = {-1, -1, "NULL"};
+            for (const QString &className : classNames) {
+                const int count = counts.value(className).toInt(0);
+                if (count <= 0)
+                    continue;
+                Target target;
+                target.x = -1;
+                target.y = -1;
+                target.name = className;
+                target.n = count;
+                target.a = -1;
+                target.b = -1;
+                targets.push_back(target);
+                chosen = target;
+            }
+        }
+        updateTargetSummaryLabel();
+        return;
+    }
+
+    if (obj.contains("grid_result") && obj["grid_result"].isObject()) {
+        const QJsonObject result = obj["grid_result"].toObject();
+        const int a = result.value("a").toInt(-1);
+        const int b = result.value("b").toInt(-1);
+        const QJsonObject counts = result.value("counts").toObject();
+        const QStringList classNames = {
+            "elephant", "tiger", "monkey", "kongque", "wolf"
+        };
+
+        if (a >= 1 && a <= 9 && b >= 1 && b <= 7) {
+            hasGridResults = true;
+            SharedData &sharedData = SharedData::getInstance();
+            {
+                std::lock_guard<std::mutex> lock(sharedData.getMutex());
+                std::vector<Target> &targets = sharedData.getTargets();
+                targets.erase(
+                    std::remove_if(
+                        targets.begin(), targets.end(),
+                        [](const Target &target) {
+                            return target.a < 1 || target.b < 1;
+                        }
+                    ),
+                    targets.end()
+                );
+                Target &chosen = sharedData.getChosenTarget();
+                for (const QString &className : classNames) {
+                    const int count = counts.value(className).toInt(0);
+                    if (count <= 0)
+                        continue;
+
+                    auto existing = std::find_if(
+                        targets.begin(), targets.end(),
+                        [a, b, &className](const Target &target) {
+                            return target.name == className && target.a == a && target.b == b;
+                        }
+                    );
+                    if (existing == targets.end()) {
+                        Target target;
+                        target.name = className;
+                        target.a = a;
+                        target.b = b;
+                        target.x = (b - 1) * 0.5;
+                        target.y = (9 - a) * 0.5;
+                        target.n = count;
+                        targets.push_back(target);
+                        chosen = target;
+                    } else {
+                        existing->n = count;
+                        chosen = *existing;
+                    }
+                }
+            }
+
+            const QString grid = QString("A%1B%2").arg(a).arg(b);
+            const QString signature = grid + "|"
+                + QString::fromUtf8(QJsonDocument(counts).toJson(QJsonDocument::Compact));
+            if (!savedGridResultSignatures.contains(signature)) {
+                if (resultsFilePath.isEmpty()) {
+                    resultsFilePath = QCoreApplication::applicationDirPath()
+                        + QString("/../animal_results_%1.csv")
+                              .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+                    QFile newFile(resultsFilePath);
+                    if (newFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                        QTextStream newStream(&newFile);
+                        setUtf8Encoding(newStream);
+                        newStream << "timestamp,grid,animal,count\n";
+                    }
+                }
+
+                QFile resultFile(resultsFilePath);
+                if (resultFile.open(QIODevice::Append | QIODevice::Text)) {
+                    QTextStream stream(&resultFile);
+                    setUtf8Encoding(stream);
+                    const QString timestamp = QDateTime::currentDateTime().toString(Qt::ISODate);
+                    bool animalFound = false;
+                    for (const QString &className : classNames) {
+                        const int count = counts.value(className).toInt(0);
+                        if (count > 0) {
+                            stream << timestamp << ',' << grid << ','
+                                   << className << ',' << count << '\n';
+                            animalFound = true;
+                        }
+                    }
+                    if (!animalFound)
+                        stream << timestamp << ',' << grid << ",none,0\n";
+                    savedGridResultSignatures.insert(signature);
+                    qDebug() << "Saved grid recognition result:" << resultsFilePath << grid;
+                }
+            }
+            updateTargetSummaryLabel();
+        }
+        return;
+    }
+
+    if (obj.contains("planner") && obj["planner"].isArray() &&
+        !obj["planner"].toArray().isEmpty() &&
+        !planningRequestActive && !routeReady) {
+        qDebug() << "Ignoring a route received after planning was cancelled or timed out.";
+        return;
+    }
+
+    if (obj.contains("forbidden") && obj["forbidden"].isArray()) {
+        QLabel *forbiddenLabels[] = {labelF1, labelF2, labelF3};
+        for (int index = 0; index < 3; ++index) {
+            dataSend[QString("f%1x").arg(index + 1)] = -1;
+            dataSend[QString("f%1y").arg(index + 1)] = -1;
+            forbiddenLabels[index]->setText("NULL");
+        }
+
+        QJsonArray forbiddenArray = obj["forbidden"].toArray();
+        int index = 0;
+        for (const QJsonValue &value : forbiddenArray) {
+            if (index >= 3 || !value.isObject()) continue;
+            QJsonObject zone = value.toObject();
+            int a = zone["a"].toInt(-1);
+            int b = zone["b"].toInt(-1);
+            if (a < 1 || a > 9 || b < 1 || b > 7) continue;
+
+            dataSend[QString("f%1x").arg(index + 1)] = a;
+            dataSend[QString("f%1y").arg(index + 1)] = b;
+            forbiddenLabels[index]->setText(
+                QString("禁飞区%1（A%2,B%3）").arg(index + 1).arg(a).arg(b)
+            );
+            ++index;
+        }
+    }
+
     if (!obj.contains("planner") || !obj["planner"].isArray()) {
         qWarning() << "JSON does not contain 'planner' array.";
         return;
     }
 
     QJsonArray plannerArray = obj["planner"].toArray();
-    if (!plannerArray.isEmpty()) {
-        wayPoints.clear();
+    if (plannerArray.isEmpty()) {
+        if (planningRequestActive)
+            resetPlanningState(QStringLiteral("规划失败，请检查禁飞区"), true);
+    } else {
+        std::vector<Point> parsedWayPoints;
         for (const QJsonValue &val : plannerArray) {
             if (!val.isObject()) continue;
             QJsonObject pointObj = val.toObject();
@@ -617,13 +1055,27 @@ void LandScreen::parseJson(const QByteArray &jsonData)
                 double x = pointObj["x"].toDouble();
                 double y = pointObj["y"].toDouble();
                 Point pt;
-                pt.a =8-static_cast<qint8>(y/0.5);
-                pt.b = static_cast<qint8>(x/0.5);
+                pt.a = static_cast<qint8>(9 - std::round(y / 0.5));
+                pt.b = static_cast<qint8>(std::round(x / 0.5) + 1);
+                if (pt.a < 1 || pt.a > 9 || pt.b < 1 || pt.b > 7)
+                    continue;
                 qDebug() << "a:" << pt.a << "b:" << pt.b;
-                wayPoints.push_back(pt);
+                parsedWayPoints.push_back(pt);
             }
         }
-        emit wayPointsReady();
+
+        if (parsedWayPoints.empty()) {
+            resetPlanningState(QStringLiteral("无可用航线"), true);
+        } else {
+            wayPoints.swap(parsedWayPoints);
+            planningRequestActive = false;
+            if (planningTimer)
+                planningTimer->stop();
+            routeReady = true;
+            launchButton->setEnabled(true);
+            launchButton->setText(QStringLiteral("启动识别"));
+            emit wayPointsReady();
+        }
     }
     SharedData& data = SharedData::getInstance();
     Target& receivedTarget = data.getChosenTarget();
@@ -665,36 +1117,83 @@ void LandScreen::ReadData()
     }
 }
 
-void LandScreen::sendData()
+bool LandScreen::sendData()
 {
     if (socket && socket->state() == QAbstractSocket::ConnectedState) {
         QJsonDocument doc(dataSend);
         QByteArray jsonData = doc.toJson(QJsonDocument::Compact);
         jsonData.append("\n");
-        socket->write(jsonData);
+        if (socket->write(jsonData) < 0) {
+            qWarning() << "Socket write failed:" << socket->errorString();
+            return false;
+        }
         qDebug() << "LandScreen sent data:" << jsonData;
+        return true;
     } else {
         qDebug() << "Socket not connected, cannot send data";
+        return false;
     }
 }
 
 // 自定义槽函数实现
 void LandScreen::drawOnMap()
 {
-    if (originalMapPixmap.isNull() || wayPoints.empty()) {
+    if (originalMapPixmap.isNull()) {
         return;
     }
 
-    int mapWidth = mapLabel->width();
-    int mapHeight = mapLabel->height();
+    QPixmap pixmap = originalMapPixmap.scaled(
+        mapLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation
+    );
+    const int mapWidth = pixmap.width();
+    const int mapHeight = pixmap.height();
+    // The supplied arena image is A1..A9 from left to right and B1..B7
+    // from bottom to top. This matches the planner's x/y conversion.
     const int cols = 9;
     const int rows = 7;
     double cellWidth = static_cast<double>(mapWidth) / cols;
     double cellHeight = static_cast<double>(mapHeight) / rows;
 
-    QPixmap pixmap = originalMapPixmap.scaled(mapWidth, mapHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing, true);
+
+    painter.save();
+    painter.setPen(QPen(QColor(255, 255, 255, 180), 1));
+    painter.setBrush(Qt::NoBrush);
+    for (int column = 0; column <= cols; ++column)
+        painter.drawLine(QPointF(column * cellWidth, 0), QPointF(column * cellWidth, mapHeight));
+    for (int row = 0; row <= rows; ++row)
+        painter.drawLine(QPointF(0, row * cellHeight), QPointF(mapWidth, row * cellHeight));
+    painter.setPen(QColor(20, 40, 70));
+    painter.setFont(QFont("Sans Serif", 10, QFont::Bold));
+    for (int column = 0; column < cols; ++column)
+        painter.drawText(QRectF(column * cellWidth, 1, cellWidth, 18), Qt::AlignCenter, QString("A%1").arg(column + 1));
+    for (int row = 0; row < rows; ++row)
+        painter.drawText(QRectF(1, row * cellHeight, 32, cellHeight), Qt::AlignVCenter, QString("B%1").arg(rows - row));
+    painter.restore();
+
+    painter.save();
+    for (int index = 1; index <= 3; ++index) {
+        int a = dataSend.value(QString("f%1x").arg(index)).toInt(-1);
+        int b = dataSend.value(QString("f%1y").arg(index)).toInt(-1);
+        if (a < 1 || a > cols || b < 1 || b > rows) {
+            continue;
+        }
+
+        QRectF forbiddenRect(
+            (a - 1) * cellWidth,
+            mapHeight - b * cellHeight,
+            cellWidth,
+            cellHeight
+        );
+        painter.fillRect(forbiddenRect, QColor(180, 0, 0, 105));
+        painter.setPen(QPen(QColor(130, 0, 0), 3));
+        painter.drawRect(forbiddenRect);
+        painter.drawLine(forbiddenRect.topLeft(), forbiddenRect.bottomRight());
+        painter.drawLine(forbiddenRect.topRight(), forbiddenRect.bottomLeft());
+    }
+    painter.restore();
+
     QPen pen(Qt::red, 4);
     painter.setPen(pen);
 
@@ -702,12 +1201,12 @@ void LandScreen::drawOnMap()
     for (const Point& pt : wayPoints) {
         int a = pt.a;
         int b = pt.b;
-        if (a < 0 || a >= cols || b < 0 || b >= rows) {
+        if (a < 1 || a > cols || b < 1 || b > rows) {
             qDebug() << "无效的坐标点: a=" << a << "b=" << b;
             continue;
         }
-        double cx = ((a + 0.5) * cellWidth);
-        double cy = (mapHeight - (b + 0.5) * cellHeight);
+        double cx = ((a - 0.5) * cellWidth);
+        double cy = (mapHeight - (b - 0.5) * cellHeight);
         cx = qBound(0.0, cx, static_cast<double>(mapWidth));
         cy = qBound(0.0, cy, static_cast<double>(mapHeight));
         centers.append(QPointF(cx, cy));
