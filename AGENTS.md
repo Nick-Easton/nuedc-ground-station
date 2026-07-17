@@ -40,6 +40,7 @@
 | `scripts/onboard_path_receiver.py` | 验证收到的路径并发布回执；当前不控制飞行器。 |
 | `scripts/fc_state_bridge.py` | 读取 MAVROS 状态、电池和本地位姿，发布 `/drone/state`；不发送飞控命令。 |
 | `scripts/vision_detection_adapter.py` | 将 `/yolo_trt_node/detections` 转换为 `/vision/detections` 和 `/vision/summary`，并限制转发速率和单帧数量。 |
+| `scripts/vision_start_on_command.py` | 收到 `START` 后启动相机、YOLO 和检测适配器；收到 `STOP` 或终止状态后释放摄像头。 |
 | `LandScreen-master/` | Qt 地图界面和本地假服务器。可执行文件名为 `planescreen`。 |
 | `launch/` | ROS 1 启动文件。 |
 | `msg/` | ROS 1 自定义消息。修改后必须重新运行 `catkin_make`。 |
@@ -164,7 +165,7 @@ roslaunch nuedc_ground_air onboard_real_vision_demo.launch start_yolo:=false
 - `vision_detection_adapter.py` 只转换检测框消息；当前没有深度融合、相机标定投影或真实地理坐标估计。
 - `fake_yolo_node.py` 是模拟数据源，不代表真实识别效果。
 - 桥接节点把图像检测中心按简单比例映射到演示场地，这是占位定位逻辑，不是真实目标地理定位。
-- `launch=true` 只在从 false 变为 true 的上升沿触发一次 `START`。
+- `launch=true` 只在从 false 变为 true 的上升沿触发一次 `START`；回到 false 时触发一次 `STOP`。集成 launch 让按格状态机常驻等待命令，摄像头、YOLO 和检测适配器按任务启停。
 - TCP 协议是一行一个 JSON；修改任一端协议时必须同时修改另一端并保留换行分隔。
 - 路径回传 JSON 的 `forbidden` 是可选数组，元素格式为 `{"a":1..9,"b":1..7}`；LandScreen 用它同步标签和禁飞格覆盖层，旧客户端可忽略。
 - 尚未实现真实飞控桥、真实相机定位、完整安全状态机和实际路径执行闭环。
@@ -220,6 +221,7 @@ YYYY-MM-DD | 作者/分支 | 变更摘要 | 已执行的验证 | 已知问题
 
 当前记录：
 
+- 2026-07-17 | `feature/real-yolo` | 审查并整合队友 `agent/ros-yolo-ground-station-integration`：新增实时 `/vision/summary`、UI 识别启停和未定位目标展示；修复按格节点错过 START、后台预览默认开启、工作区加载顺序和终止状态重复 STOP | Python 编译、XML 解析、Git 空白及 START/STOP 模拟生命周期检查通过；队友此前已完成 NX 启停与 Qt 构建验证 | 本轮两台 Jetson 因热点离线，尚未对整合结果重新执行远程 catkin_make 和 Qt 构建。
 - 2026-07-17 | `feature/real-yolo` | 修复 Qt 规划状态无法取消/失败不复位、桥空闲约 60 秒退出和 NX 一体化 launch 未部署的问题；新增用户级自动启动服务 | Nano Qt 构建、NX catkin_make、桥持续运行且无重启、TCP 三禁区返回 63 点路径通过 | 手机热点实测平均延迟约 600-825 ms 且有丢包，NoMachine 交互仍受网络质量限制。
 - 2026-07-16 | `feature/real-yolo` | 合并 `agent/contest-ground-station-integration`，保留真实 YOLO 参数、只读 MAVROS 参数和禁飞格覆盖层，并接入 A* 闭合覆盖、按格识别、CSV 与连接设置 | Python 编译、launch/package XML、Git 空白和代表性路径约束检查通过 | 当前无法通过 SSH 登录 Jetson，尚未对合并结果重新执行 catkin_make 和 Qt 构建。
 - 2026-07-16 | `agent/contest-ground-station-integration` | 汇总比赛参数、A* 闭合覆盖、真实 YOLO、按格识别、五类目标页、CSV、运行时连接设置、桌面快捷方式和一体化 NX launch | Python/XML/路径约束检查；此前已在 Jetson 完成 catkin_make、Qt CMake 构建、TCP/UI、`z=1.2` 和手动 `/current_grid` 验证 | 当前 NX 暂时离线；未修改飞控控制，路径执行、定位和激光仍待飞控负责人完成。

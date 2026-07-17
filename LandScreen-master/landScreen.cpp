@@ -399,14 +399,31 @@ void LandScreen::CreateUI()
         onCancelClicked();
     });
     connect(launchButton, &QPushButton::clicked, [this]() {
+        if (dataSend.value("launch").toBool(false)) {
+            dataSend["launch"] = false;
+            if (!sendData()) {
+                dataSend["launch"] = true;
+                QMessageBox::warning(this, QStringLiteral("停止失败"),
+                                     QStringLiteral("未能向机载电脑发送停止识别命令。"));
+                return;
+            }
+            launchButton->setText(QStringLiteral("启动识别"));
+            launchButton->setEnabled(routeReady);
+            return;
+        }
         if (!routeReady) {
             QMessageBox::information(this, "请先规划", "请先发送禁飞区并等待地图显示规划航线。");
             return;
         }
         dataSend["launch"] = true;
-        sendData();
-        launchButton->setText("识别已启动");
-        launchButton->setEnabled(false);
+        if (!sendData()) {
+            dataSend["launch"] = false;
+            QMessageBox::warning(this, QStringLiteral("启动失败"),
+                                 QStringLiteral("未能向机载电脑发送启动识别命令。"));
+            return;
+        }
+        launchButton->setText(QStringLiteral("停止识别"));
+        launchButton->setEnabled(true);
     });
 
     buttonLayout->addWidget(sendButton, 1);
@@ -786,6 +803,7 @@ void LandScreen::onCancelClicked()
         dataSend[QString("f%1y").arg(index)] = -1;
     }
     dataSend["launch"] = false;
+    sendData();
 
     selectedButtonA = -1;
     selectedButtonB = -1;
@@ -834,6 +852,7 @@ void LandScreen::parseJson(const QByteArray &jsonData)
             chosen = {-1, -1, "NULL"};
         }
         savedGridResultSignatures.clear();
+        hasGridResults = false;
         resultsFilePath = QCoreApplication::applicationDirPath()
             + QString("/../animal_results_%1.csv")
                   .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
@@ -846,6 +865,51 @@ void LandScreen::parseJson(const QByteArray &jsonData)
         updateTargetSummaryLabel();
     }
 
+    if (obj.contains("vision_summary") && obj["vision_summary"].isObject()) {
+        if (hasGridResults)
+            return;
+
+        const QJsonObject summary = obj["vision_summary"].toObject();
+        const QJsonObject counts = summary.value("counts").toObject();
+        const QStringList classNames = {
+            "elephant", "tiger", "monkey", "kongque", "wolf"
+        };
+
+        SharedData &sharedData = SharedData::getInstance();
+        {
+            std::lock_guard<std::mutex> lock(sharedData.getMutex());
+            std::vector<Target> &targets = sharedData.getTargets();
+            targets.erase(
+                std::remove_if(
+                    targets.begin(), targets.end(),
+                    [](const Target &target) {
+                        return target.a < 1 || target.b < 1;
+                    }
+                ),
+                targets.end()
+            );
+
+            Target &chosen = sharedData.getChosenTarget();
+            chosen = {-1, -1, "NULL"};
+            for (const QString &className : classNames) {
+                const int count = counts.value(className).toInt(0);
+                if (count <= 0)
+                    continue;
+                Target target;
+                target.x = -1;
+                target.y = -1;
+                target.name = className;
+                target.n = count;
+                target.a = -1;
+                target.b = -1;
+                targets.push_back(target);
+                chosen = target;
+            }
+        }
+        updateTargetSummaryLabel();
+        return;
+    }
+
     if (obj.contains("grid_result") && obj["grid_result"].isObject()) {
         const QJsonObject result = obj["grid_result"].toObject();
         const int a = result.value("a").toInt(-1);
@@ -856,10 +920,20 @@ void LandScreen::parseJson(const QByteArray &jsonData)
         };
 
         if (a >= 1 && a <= 9 && b >= 1 && b <= 7) {
+            hasGridResults = true;
             SharedData &sharedData = SharedData::getInstance();
             {
                 std::lock_guard<std::mutex> lock(sharedData.getMutex());
                 std::vector<Target> &targets = sharedData.getTargets();
+                targets.erase(
+                    std::remove_if(
+                        targets.begin(), targets.end(),
+                        [](const Target &target) {
+                            return target.a < 1 || target.b < 1;
+                        }
+                    ),
+                    targets.end()
+                );
                 Target &chosen = sharedData.getChosenTarget();
                 for (const QString &className : classNames) {
                     const int count = counts.value(className).toInt(0);

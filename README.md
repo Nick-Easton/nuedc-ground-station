@@ -126,7 +126,7 @@ cd ~/LandScreen-master/build
 
 连接设置中的端口必须是 TCP 桥的 `8001`，不能填写 NoMachine 的 `4000`。发送规划请求后，UI 会在断线、发送失败、空路径或 10 秒超时时退出“航线规划中”；点击“取消”会同步清空禁飞数据、旧航线和规划状态。TCP 桥会忽略空闲 socket 超时并继续监听，不再因 60 秒无新连接或无数据而退出。
 
-集成 launch 同时启动 TCP 桥、路径规划、路径校验、视觉消息转换、按格识别状态机和视觉启动器。桥接节点接收 LandScreen 发来的禁区 JSON，并发布到 `/mission/forbidden_zones`。当 `launch=true` 时，它会向 `/mission/command` 发送 `START`；摄像头与 YOLO 在此时启动，规划路径和按格识别结果自动回传 UI。
+集成 launch 常驻启动 TCP 桥、路径规划、路径校验、按格识别状态机和视觉启动器，但默认不占用摄像头。桥接节点接收 LandScreen 发来的禁区 JSON，并发布到 `/mission/forbidden_zones`。当 `launch=true` 时，它会向 `/mission/command` 发送 `START`，再启动摄像头、YOLO 和视觉消息转换；按格状态机因预先运行而不会错过 START。UI 点击“停止识别”或“取消”、任务结束或异常时会发送 `STOP` 并释放摄像头。规划路径、实时类别数量和按格识别结果都会自动回传 UI。
 
 ## 6. 地面端路径规划演示
 
@@ -237,7 +237,7 @@ roslaunch nuedc_ground_air onboard_real_vision_demo.launch \
 roslaunch nuedc_ground_air onboard_real_vision_demo.launch start_yolo:=false
 ```
 
-`onboard_real_vision_demo.launch` 是独立视觉调试入口，不会启动 TCP 桥、规划器或按格识别状态机。比赛集成时使用第 5 节的 `landscreen_ros1_bridge.launch`，不要同时运行两个入口中的检测适配器，以免重复发布 `/vision/detections`。
+`onboard_real_vision_demo.launch` 是独立视觉调试入口，会启动 YOLO、检测适配器和按格识别状态机，但不会启动 TCP 桥或规划器。比赛集成时使用第 5 节的 `landscreen_ros1_bridge.launch`；它会按任务命令启动视觉子进程，不要再手动运行独立入口，以免重复占用摄像头或发布 `/vision/detections`。
 
 查看带框画面：
 
@@ -247,7 +247,7 @@ rqt_image_view /yolo_trt_node/annotated
 
 适配器将类别编号映射为 `elephant`、`tiger`、`monkey`、`kongque`、`wolf`，并额外发布 JSON 统计 `/vision/summary`。该启动文件会关闭 `fake_yolo_node.py`，避免模拟检测与真实检测同时发布。默认置信度为 `0.60`，默认最多以 `5 Hz` 转发每帧置信度最高的 10 个目标；这些值均可通过 launch 参数修改。
 
-LandScreen 的绿色“发送”按钮只发送禁飞区和任务信息。识别结果由桥接节点自动转发到“显示目标信息”页面。当前只回传类别、置信度和检测框；桥内由像素中心换算场地坐标的逻辑仍是模拟占位，不代表真实目标定位。
+LandScreen 的绿色“发送”按钮只发送禁飞区和任务信息。识别结果由桥接节点自动转发到“显示目标信息”页面：定位接入前使用 `/vision/summary` 显示实时类别和数量，收到 `/vision/grid_result` 后改为按格累计显示。当前没有深度融合或真实地理定位；非按格模式下由像素中心换算场地坐标的逻辑仍是模拟占位。
 
 2026-07-15 已在机载电脑使用 `/dev/video0` 验证 USB Camera 和 TensorRT YOLO：`/usb_cam/image_raw` 与 `/yolo_trt_node/annotated` 均稳定在约 `30 Hz`，空场景会发布空检测数组和 `{"counts":{},"total":0}`。真实动物正样本识别仍需摆放对应图片或实物验证。
 

@@ -86,6 +86,7 @@ private:
     bool planningRequestActive = false;
     QString resultsFilePath;
     QSet<QString> savedGridResultSignatures;
+    bool hasGridResults = false;
     void CreateUI();
     void onButtonAClicked(int index);
     void onButtonBClicked(int index);

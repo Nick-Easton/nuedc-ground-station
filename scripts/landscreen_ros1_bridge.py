@@ -27,6 +27,7 @@ class LandScreenRos1Bridge:
             "/mission/forbidden_zones", ForbiddenZones, self.on_forbidden_zones
         )
         rospy.Subscriber("/vision/detections", Detection2D, self.on_detection)
+        rospy.Subscriber("/vision/summary", String, self.on_vision_summary)
         rospy.Subscriber("/vision/grid_result", String, self.on_grid_result)
         rospy.Subscriber("/planner/path", Path, self.on_path)
 
@@ -106,6 +107,8 @@ class LandScreenRos1Bridge:
         if zones.launch and not self.last_launch:
             self.send_to_ground({"planner": [], "reset_targets": True})
             self.publish_command("START")
+        elif not zones.launch and self.last_launch:
+            self.publish_command("STOP")
         self.last_launch = zones.launch
 
         rospy.loginfo(
@@ -126,7 +129,21 @@ class LandScreenRos1Bridge:
         self.command_pub.publish(msg)
 
     def on_mission_state(self, msg):
-        if msg.state == "IDLE":
+        state = msg.state.strip().upper()
+        if state in (
+            "FINISH",
+            "FINISHED",
+            "COMPLETE",
+            "COMPLETED",
+            "LANDED",
+            "ABORT",
+            "FAILED",
+            "ERROR",
+        ):
+            if self.last_launch:
+                self.publish_command("STOP")
+            self.last_launch = False
+        if state == "IDLE":
             return
         self.send_to_ground({"planner": [], "tx": -1, "ty": -1, "tn": "NULL"})
 
@@ -156,6 +173,17 @@ class LandScreenRos1Bridge:
             return
         self.send_to_ground({"planner": [], "grid_result": result})
         rospy.loginfo("Forwarded grid recognition result: %s", result.get("grid", ""))
+
+    def on_vision_summary(self, msg):
+        try:
+            summary = json.loads(msg.data)
+        except ValueError as exc:
+            rospy.logwarn("Bad vision summary: %s", exc)
+            return
+        if not isinstance(summary.get("counts", {}), dict):
+            rospy.logwarn("Bad vision summary counts: %s", summary)
+            return
+        self.send_to_ground({"planner": [], "vision_summary": summary})
 
     def on_forbidden_zones(self, msg):
         forbidden = []
