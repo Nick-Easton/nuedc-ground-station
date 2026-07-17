@@ -1,0 +1,44 @@
+<launch>
+  <arg name="start_yolo" default="true"/>
+  <arg name="camera" default="/dev/video0"/>
+  <arg name="image_width" default="640"/>
+  <arg name="image_height" default="480"/>
+  <arg name="fps" default="30"/>
+  <arg name="engine" default="$(env HOME)/catkin_ws_yolo_trt/src/yolo_trt_ros/models/best.engine"/>
+  <arg name="confidence" default="0.35"/>
+  <arg name="iou_threshold" default="0.45"/>
+  <arg name="show_window" default="false"/>
+  <arg name="max_rate" default="5.0"/>
+  <arg name="max_detections" default="10"/>
+
+  <include if="$(arg start_yolo)" file="$(find yolo_trt_ros)/launch/yolo_trt_usb_cam.launch">
+    <arg name="camera" value="$(arg camera)"/>
+    <arg name="image_width" value="$(arg image_width)"/>
+    <arg name="image_height" value="$(arg image_height)"/>
+    <arg name="fps" value="$(arg fps)"/>
+    <arg name="engine" value="$(arg engine)"/>
+    <arg name="conf_thres" value="$(arg confidence)"/>
+    <arg name="iou_thres" value="$(arg iou_threshold)"/>
+    <arg name="show_window" value="$(arg show_window)"/>
+  </include>
+
+  <node pkg="nuedc_ground_air" type="vision_detection_adapter.py" name="vision_detection_adapter" output="screen">
+    <env name="PYTHONPATH" value="$(env HOME)/catkin_ws/devel/lib/python3/dist-packages:$(env PYTHONPATH)"/>
+    <param name="input_topic" value="/yolo_trt_node/detections"/>
+    <param name="output_topic" value="/vision/detections"/>
+    <param name="summary_topic" value="/vision/summary"/>
+    <param name="min_confidence" value="$(arg confidence)"/>
+    <param name="max_rate" value="$(arg max_rate)"/>
+    <param name="max_detections" value="$(arg max_detections)"/>
+    <rosparam param="class_names">[elephant, tiger, monkey, kongque, wolf]</rosparam>
+  </node>
+
+  <node pkg="nuedc_ground_air" type="grid_recognition_state_machine.py" name="grid_recognition_state_machine" output="screen">
+    <env name="PYTHONPATH" value="$(env HOME)/catkin_ws/devel/lib/python3/dist-packages:$(env PYTHONPATH)"/>
+    <param name="stabilize_seconds" value="0.3"/>
+    <param name="recognition_seconds" value="1.0"/>
+    <param name="min_confidence" value="$(arg confidence)"/>
+    <param name="current_grid_topic" value="/current_grid"/>
+    <param name="detection_topic" value="/vision/detections"/>
+  </node>
+</launch>

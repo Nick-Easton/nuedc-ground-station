@@ -1,9 +1,50 @@
 <launch>
   <arg name="host" default="0.0.0.0"/>
   <arg name="port" default="8001"/>
+  <arg name="camera" default="/dev/video0"/>
+  <arg name="show_window" default="true"/>
+  <arg name="grid_mode" default="true"/>
+  <arg name="current_grid_topic" default="/current_grid"/>
+  <arg name="start_planner" default="true"/>
+  <arg name="start_path_receiver" default="true"/>
+  <arg name="start_vision_adapter" default="false"/>
+  <arg name="start_grid_recognition" default="false"/>
+  <arg name="altitude" default="1.2"/>
+  <arg name="grid_spacing" default="0.5"/>
+
+  <node if="$(arg start_planner)" pkg="nuedc_ground_air" type="ground_path_planner.py" name="ground_path_planner" output="screen">
+    <param name="altitude" value="$(arg altitude)"/>
+    <param name="grid_spacing" value="$(arg grid_spacing)"/>
+  </node>
+
+  <node if="$(arg start_path_receiver)" pkg="nuedc_ground_air" type="onboard_path_receiver.py" name="onboard_path_receiver" output="screen"/>
 
   <node pkg="nuedc_ground_air" type="landscreen_ros1_bridge.py" name="landscreen_ros1_bridge" output="screen">
     <param name="host" value="$(arg host)"/>
     <param name="port" value="$(arg port)"/>
+    <param name="grid_mode" value="$(arg grid_mode)"/>
+  </node>
+
+  <node pkg="nuedc_ground_air" type="vision_start_on_command.py" name="vision_start_on_command" output="screen">
+    <param name="camera" value="$(arg camera)"/>
+    <param name="show_window" value="$(arg show_window)"/>
+  </node>
+
+  <node if="$(arg start_vision_adapter)" pkg="nuedc_ground_air" type="vision_detection_adapter.py" name="vision_detection_adapter" output="screen">
+    <param name="input_topic" value="/yolo_trt_node/detections"/>
+    <param name="output_topic" value="/vision/detections"/>
+    <param name="summary_topic" value="/vision/summary"/>
+    <param name="min_confidence" value="0.60"/>
+    <param name="max_rate" value="5.0"/>
+    <param name="max_detections" value="10"/>
+    <rosparam param="class_names">[elephant, tiger, monkey, kongque, wolf]</rosparam>
+  </node>
+
+  <node if="$(arg start_grid_recognition)" pkg="nuedc_ground_air" type="grid_recognition_state_machine.py" name="grid_recognition_state_machine" output="screen">
+    <param name="stabilize_seconds" value="0.3"/>
+    <param name="recognition_seconds" value="1.0"/>
+    <param name="min_confidence" value="0.60"/>
+    <param name="current_grid_topic" value="$(arg current_grid_topic)"/>
+    <param name="detection_topic" value="/vision/detections"/>
   </node>
 </launch>

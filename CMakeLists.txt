@@ -36,5 +36,8 @@ catkin_install_python(PROGRAMS
   scripts/ground_station_cli.py
   scripts/mission_node.py
   scripts/onboard_path_receiver.py
+  scripts/vision_detection_adapter.py
+  scripts/vision_start_on_command.py
+  scripts/grid_recognition_state_machine.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

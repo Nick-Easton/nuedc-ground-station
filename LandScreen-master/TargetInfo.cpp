@@ -1,217 +1,273 @@
 #include "TargetInfo.h"
-#include <QMessageBox>
-#include <QFont>
-#include <QDebug>
+
+#include <QFrame>
+#include <QGridLayout>
+#include <QHeaderView>
+#include <QHideEvent>
+#include <QPushButton>
+#include <QShowEvent>
+#include <QVBoxLayout>
+
+#include <array>
+
+namespace {
+struct AnimalDefinition {
+    const char *key;
+    const char *chineseName;
+    const char *englishName;
+    const char *color;
+};
+
+const std::array<AnimalDefinition, 5> kAnimals = {{
+    {"elephant", "大象", "elephant", "#6C7A89"},
+    {"tiger", "老虎", "tiger", "#E67E22"},
+    {"monkey", "猴子", "monkey", "#9B6B43"},
+    {"kongque", "孔雀", "kongque", "#168D82"},
+    {"wolf", "狼", "wolf", "#52677D"},
+}};
+
+QString chineseNameFor(const QString &key)
+{
+    for (const AnimalDefinition &animal : kAnimals) {
+        if (key == QLatin1String(animal.key))
+            return QString::fromUtf8(animal.chineseName);
+    }
+    return key;
+}
+
+QString gridText(const Target &target)
+{
+    if (target.a >= 1 && target.a <= 9 && target.b >= 1 && target.b <= 7)
+        return QString("A%1B%2").arg(target.a).arg(target.b);
+    return QStringLiteral("位置待定位");
+}
+}
 
 TargetInfo::TargetInfo(QWidget *parent)
     : QDialog(parent)
-    , mainLayout(nullptr)
-    , scrollArea(nullptr)
-    , scrollContent(nullptr)
-    , scrollLayout(nullptr)
 {
     setupUI();
-    // 不在构造函数里加载数据
+    refreshTimer = new QTimer(this);
+    refreshTimer->setInterval(1000);
+    connect(refreshTimer, &QTimer::timeout, this, &TargetInfo::loadTargets);
 }
 
 void TargetInfo::showEvent(QShowEvent *event)
 {
     QDialog::showEvent(event);
-    // 清空旧内容
-    QLayoutItem *child;
-    while ((child = scrollLayout->takeAt(0)) != nullptr) {
-        delete child->widget();
-        delete child;
-    }
-    loadTargets(); // 每次显示时重新加载数据
+    loadTargets();
+    refreshTimer->start();
 }
 
-TargetInfo::~TargetInfo()
+void TargetInfo::hideEvent(QHideEvent *event)
 {
+    refreshTimer->stop();
+    QDialog::hideEvent(event);
 }
 
 void TargetInfo::setupUI()
 {
-    setWindowTitle("目标信息");
-    setModal(true); // 设置为模态对话框
-    resize(800, 600); // 增大窗口尺寸以容纳统计信息
+    setWindowTitle(QStringLiteral("动物目标信息"));
+    setModal(true);
+    setMinimumSize(960, 640);
+    setStyleSheet("QDialog { background: #F4F6F8; color: #25313C; }");
 
-    // 主布局
-    mainLayout = new QVBoxLayout(this);
-    
-    // 创建水平布局来放置目标列表和统计信息
-    QHBoxLayout* contentLayout = new QHBoxLayout;
-    
-    // 左侧：目标列表
-    QWidget* targetListWidget = new QWidget;
-    QVBoxLayout* targetListLayout = new QVBoxLayout(targetListWidget);
-    
-    QLabel* targetListTitle = new QLabel("目标详细信息");
-    targetListTitle->setStyleSheet("font-size: 16px; font-weight: bold; margin: 5px;");
-    targetListLayout->addWidget(targetListTitle);
+    QVBoxLayout *mainLayout = new QVBoxLayout(this);
+    mainLayout->setContentsMargins(28, 24, 28, 24);
+    mainLayout->setSpacing(18);
 
-    // 创建滚动区域
-    scrollArea = new QScrollArea(this);
-    scrollArea->setWidgetResizable(true);
-    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    QLabel *title = new QLabel(QStringLiteral("动物识别结果"), this);
+    title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet("font-size: 30px; font-weight: 700; color: #1F2D3D;");
+    mainLayout->addWidget(title);
 
-    // 滚动内容容器
-    scrollContent = new QWidget;
-    scrollLayout = new QVBoxLayout(scrollContent);
-    scrollLayout->setAlignment(Qt::AlignTop);
+    QLabel *subtitle = new QLabel(
+        QStringLiteral("固定显示 5 类动物；数量按识别记录汇总，位置按 A/B 方格显示"), this
+    );
+    subtitle->setAlignment(Qt::AlignCenter);
+    subtitle->setStyleSheet("font-size: 15px; color: #6B7785;");
+    mainLayout->addWidget(subtitle);
 
-    scrollArea->setWidget(scrollContent);
-    targetListLayout->addWidget(scrollArea);
-    
-    // 右侧：统计信息
-    createStatisticsSection();
-    
-    // 添加到水平布局
-    contentLayout->addWidget(targetListWidget, 2); // 目标列表占2/3
-    contentLayout->addWidget(statisticsWidget, 1); // 统计信息占1/3
-    
-    mainLayout->addLayout(contentLayout);
+    QGridLayout *cardLayout = new QGridLayout;
+    cardLayout->setHorizontalSpacing(14);
+    cardLayout->setVerticalSpacing(14);
 
-    // 添加关闭按钮
-    QPushButton* closeButton = new QPushButton("关闭");
-    closeButton->setFont(QFont("Arial", 12, QFont::Bold));
-    closeButton->setMinimumHeight(40);
+    for (int index = 0; index < static_cast<int>(kAnimals.size()); ++index) {
+        const AnimalDefinition &animal = kAnimals[index];
+        QFrame *card = new QFrame(this);
+        card->setMinimumHeight(150);
+        card->setStyleSheet(QString(
+            "QFrame { background: white; border: 1px solid #D9E0E6; "
+            "border-top: 6px solid %1; border-radius: 10px; }"
+        ).arg(animal.color));
+
+        QVBoxLayout *cardBody = new QVBoxLayout(card);
+        cardBody->setContentsMargins(16, 12, 16, 14);
+        cardBody->setSpacing(5);
+
+        QLabel *name = new QLabel(
+            QString("%1  /  %2")
+                .arg(QString::fromUtf8(animal.chineseName))
+                .arg(QLatin1String(animal.englishName)),
+            card
+        );
+        name->setAlignment(Qt::AlignCenter);
+        name->setStyleSheet("border: none; font-size: 18px; font-weight: 700;");
+
+        QLabel *count = new QLabel(QStringLiteral("0"), card);
+        count->setAlignment(Qt::AlignCenter);
+        count->setStyleSheet(QString(
+            "border: none; font-size: 40px; font-weight: 800; color: %1;"
+        ).arg(animal.color));
+
+        QLabel *unit = new QLabel(QStringLiteral("数量"), card);
+        unit->setAlignment(Qt::AlignCenter);
+        unit->setStyleSheet("border: none; font-size: 13px; color: #7B8794;");
+
+        QLabel *grids = new QLabel(QStringLiteral("所在格子：暂无"), card);
+        grids->setAlignment(Qt::AlignCenter);
+        grids->setWordWrap(true);
+        grids->setStyleSheet(
+            "border: none; background: #F7F9FB; border-radius: 5px; "
+            "padding: 6px; font-size: 13px; color: #465565;"
+        );
+
+        cardBody->addWidget(name);
+        cardBody->addWidget(count);
+        cardBody->addWidget(unit);
+        cardBody->addWidget(grids);
+        cardLayout->addWidget(card, 0, index);
+
+        animalWidgets.insert(QLatin1String(animal.key), {count, grids});
+    }
+    mainLayout->addLayout(cardLayout);
+
+    QFrame *detailFrame = new QFrame(this);
+    detailFrame->setStyleSheet(
+        "QFrame { background: white; border: 1px solid #D9E0E6; border-radius: 10px; }"
+    );
+    QVBoxLayout *detailLayout = new QVBoxLayout(detailFrame);
+    detailLayout->setContentsMargins(16, 14, 16, 16);
+    detailLayout->setSpacing(10);
+
+    QLabel *detailTitle = new QLabel(QStringLiteral("按方格统计"), detailFrame);
+    detailTitle->setStyleSheet("border: none; font-size: 19px; font-weight: 700;");
+    detailLayout->addWidget(detailTitle);
+
+    detailTable = new QTableWidget(detailFrame);
+    detailTable->setColumnCount(3);
+    detailTable->setHorizontalHeaderLabels(
+        {QStringLiteral("动物种类"), QStringLiteral("所在方格"), QStringLiteral("数量")}
+    );
+    detailTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    detailTable->verticalHeader()->setVisible(false);
+    detailTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    detailTable->setSelectionMode(QAbstractItemView::NoSelection);
+    detailTable->setAlternatingRowColors(true);
+    detailTable->setStyleSheet(
+        "QTableWidget { border: 1px solid #E1E6EB; gridline-color: #E8EDF1; "
+        "font-size: 16px; alternate-background-color: #F7F9FB; }"
+        "QHeaderView::section { background: #EAF0F5; border: none; "
+        "border-right: 1px solid #D7DFE6; padding: 10px; font-size: 16px; "
+        "font-weight: 700; }"
+    );
+    detailLayout->addWidget(detailTable, 1);
+    mainLayout->addWidget(detailFrame, 1);
+
+    QHBoxLayout *footer = new QHBoxLayout;
+    totalLabel = new QLabel(QStringLiteral("目标总数：0"), this);
+    totalLabel->setStyleSheet(
+        "background: #22364A; color: white; border-radius: 7px; "
+        "padding: 11px 20px; font-size: 20px; font-weight: 700;"
+    );
+
+    QPushButton *closeButton = new QPushButton(QStringLiteral("返回主页面"), this);
+    closeButton->setMinimumSize(180, 48);
+    closeButton->setStyleSheet(
+        "QPushButton { background: #1677C8; color: white; border: none; "
+        "border-radius: 7px; font-size: 17px; font-weight: 700; }"
+        "QPushButton:hover { background: #0E65AD; }"
+    );
     connect(closeButton, &QPushButton::clicked, this, &QDialog::accept);
-    mainLayout->addWidget(closeButton);
-}
 
-void TargetInfo::createStatisticsSection()
-{
-    statisticsWidget = new QWidget;
-    statisticsWidget->setStyleSheet("QWidget { background-color: #e8e8e8; border: 1px solid #ccc; }");
-    statisticsLayout = new QVBoxLayout(statisticsWidget);
-    
-    QLabel* statisticsTitle = new QLabel("目标统计");
-    statisticsTitle->setStyleSheet("font-size: 16px; font-weight: bold; margin: 5px; text-align: center;");
-    statisticsTitle->setAlignment(Qt::AlignCenter);
-    statisticsLayout->addWidget(statisticsTitle);
-    
-    statisticsLayout->addStretch(); // 添加弹性空间，让统计信息居中显示
-}
-
-void TargetInfo::updateStatistics(const std::vector<Target>& targets)
-{
-    // 清除旧的统计标签
-    for (auto& pair : statisticsLabels) {
-        statisticsLayout->removeWidget(pair.second);
-        delete pair.second;
-    }
-    statisticsLabels.clear();
-    
-    // 统计各类型目标的n值总和
-    std::map<QString, int> typeSum;
-    for (const auto& target : targets) {
-        if (target.name != "NULL") {
-            typeSum[target.name] += target.n;
-        }
-    }
-    
-    // 创建统计标签
-    for (const auto& pair : typeSum) {
-        QLabel* countLabel = new QLabel(QString("%1: %2").arg(pair.first).arg(pair.second));
-        countLabel->setStyleSheet("font-size: 14px; margin: 3px; padding: 5px; background-color: white; border-radius: 3px;");
-        countLabel->setAlignment(Qt::AlignCenter);
-        
-        statisticsLabels[pair.first] = countLabel;
-        statisticsLayout->insertWidget(statisticsLayout->count() - 1, countLabel); // 在弹性空间前插入
-    }
-    
-    // 添加总数统计
-    int totalSum = 0;
-    for (const auto& pair : typeSum) {
-        totalSum += pair.second;
-    }
-    
-    QLabel* totalLabel = new QLabel(QString("总计: %1").arg(totalSum));
-    totalLabel->setStyleSheet("font-size: 15px; font-weight: bold; margin: 5px; padding: 8px; background-color: #d0d0d0; border-radius: 3px;");
-    totalLabel->setAlignment(Qt::AlignCenter);
-    statisticsLayout->insertWidget(statisticsLayout->count() - 1, totalLabel);
+    footer->addWidget(totalLabel);
+    footer->addStretch();
+    footer->addWidget(closeButton);
+    mainLayout->addLayout(footer);
 }
 
 void TargetInfo::loadTargets()
 {
-    SharedData& sharedData = SharedData::getInstance();
     std::vector<Target> targets;
+    SharedData &sharedData = SharedData::getInstance();
     {
         std::lock_guard<std::mutex> lock(sharedData.getMutex());
         targets = sharedData.getTargets();
     }
 
-    // 更新统计信息
-    updateStatistics(targets);
+    QMap<QString, int> totals;
+    QMap<QString, QMap<QString, int>> byGrid;
+    for (const AnimalDefinition &animal : kAnimals)
+        totals.insert(QLatin1String(animal.key), 0);
 
-    // 创建所有目标项
-    for (size_t i = 0; i < targets.size(); ++i) {
-        if (targets[i].name!="NULL")
-        {
-            createTargetItem(targets[i], static_cast<int>(i));
-            qDebug()<<"name"<<targets[i].name<<"x"<<targets[i].x<<"y"<<targets[i].y;
+    for (const Target &target : targets) {
+        const QString key = target.name.trimmed().toLower();
+        if (!totals.contains(key))
+            continue;
+        const int count = qMax(1, target.n);
+        const QString grid = gridText(target);
+        totals[key] += count;
+        byGrid[key][grid] += count;
+    }
+
+    int grandTotal = 0;
+    int rowCount = 0;
+    for (const AnimalDefinition &animal : kAnimals) {
+        const QString key = QLatin1String(animal.key);
+        grandTotal += totals.value(key);
+        rowCount += byGrid.value(key).size();
+
+        const AnimalWidgets widgets = animalWidgets.value(key);
+        widgets.count->setText(QString::number(totals.value(key)));
+
+        QStringList locations;
+        const QMap<QString, int> grids = byGrid.value(key);
+        for (auto iterator = grids.cbegin(); iterator != grids.cend(); ++iterator)
+            locations << QString("%1 ×%2").arg(iterator.key()).arg(iterator.value());
+        widgets.grids->setText(
+            locations.isEmpty()
+                ? QStringLiteral("所在格子：暂无")
+                : QStringLiteral("所在格子：") + locations.join(QStringLiteral("、"))
+        );
+    }
+
+    detailTable->clearContents();
+    detailTable->setRowCount(qMax(1, rowCount));
+    int row = 0;
+    for (const AnimalDefinition &animal : kAnimals) {
+        const QString key = QLatin1String(animal.key);
+        const QMap<QString, int> grids = byGrid.value(key);
+        for (auto iterator = grids.cbegin(); iterator != grids.cend(); ++iterator) {
+            const QString displayName = QString("%1 / %2")
+                .arg(chineseNameFor(key))
+                .arg(key);
+            detailTable->setItem(row, 0, new QTableWidgetItem(displayName));
+            detailTable->setItem(row, 1, new QTableWidgetItem(iterator.key()));
+            detailTable->setItem(row, 2, new QTableWidgetItem(QString::number(iterator.value())));
+            for (int column = 0; column < 3; ++column)
+                detailTable->item(row, column)->setTextAlignment(Qt::AlignCenter);
+            ++row;
         }
     }
-}
 
-void TargetInfo::createTargetItem(const Target& target, int index)
-{
-    // 创建水平布局的目标项
-    QWidget* itemWidget = new QWidget;
-    QHBoxLayout* itemLayout = new QHBoxLayout(itemWidget);
+    if (rowCount == 0) {
+        QTableWidgetItem *empty = new QTableWidgetItem(QStringLiteral("暂无有效识别结果"));
+        empty->setTextAlignment(Qt::AlignCenter);
+        detailTable->setItem(0, 0, empty);
+        detailTable->setSpan(0, 0, 1, 3);
+    } else {
+        detailTable->clearSpans();
+    }
 
-    // 去除边框，仅设置背景色和最小高度
-    itemWidget->setStyleSheet("QWidget { margin: 1px; padding: 2px; background-color: #f0f0f0; min-height: 24px; }");
-
-    // 设置较小字体
-    QFont labelFont("Arial", 15, QFont::Normal);
-
-    // 名称标签
-    QLabel* nameLabel = new QLabel(target.name);
-    nameLabel->setMinimumWidth(50);
-    nameLabel->setFont(labelFont);
-    nameLabel->setStyleSheet("font-size: 15px;");
-
-    // X坐标标签（整数显示）
-    QLabel* xLabel = new QLabel(QString("A: %1").arg(int(target.a)));
-    xLabel->setMinimumWidth(40);
-    xLabel->setFont(labelFont);
-    xLabel->setStyleSheet("font-size: 15px;");
-
-    // Y坐标标签（整数显示）
-    QLabel* yLabel = new QLabel(QString("B: %1").arg(int(target.b)));
-    yLabel->setMinimumWidth(40);
-    yLabel->setFont(labelFont);
-    yLabel->setStyleSheet("font-size: 15px;");
-
-    QLabel* nLabel = new QLabel(QString("N: %1").arg(int(target.n)));
-    yLabel->setMinimumWidth(40);
-    yLabel->setFont(labelFont);
-    yLabel->setStyleSheet("font-size: 15px;");
-
-    // 添加到布局（无按钮）
-    itemLayout->addWidget(nameLabel);
-    itemLayout->addStretch(); // 添加弹性空间
-    itemLayout->addWidget(xLabel);
-    itemLayout->addStretch(); // 添加弹性空间
-    itemLayout->addWidget(yLabel);
-    itemLayout->addStretch(); // 添加弹性空间
-    itemLayout->addWidget(nLabel);
-
-    // 添加到滚动布局
-    scrollLayout->addWidget(itemWidget);
-}
-
-void TargetInfo::onRescueButtonClicked(const Target& target)
-{
-    SharedData& sharedData = SharedData::getInstance();
-        std::lock_guard<std::mutex> lock(sharedData.getMutex());
-        Target& chosenTarget = sharedData.getChosenTarget();
-
-        // 设置选中的目标
-        chosenTarget.x = target.x;
-        chosenTarget.y = target.y;
-        chosenTarget.name = target.name;
+    totalLabel->setText(QString("目标总数：%1").arg(grandTotal));
 }
