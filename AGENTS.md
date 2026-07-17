@@ -174,7 +174,7 @@ roslaunch nuedc_ground_air onboard_real_vision_demo.launch start_yolo:=false
 
 1. 开始工作前运行 `git status -sb`，确认没有覆盖队友未提交的更改。
 2. 获取进度优先使用 `git pull --ff-only`。如果本地有未提交修改，先提交或暂存，不要强制覆盖。
-3. 较大的功能使用独立分支，例如 `feature/real-yolo`、`feature/fc-bridge`；通过 PR 合并到 `main`。
+3. 所有代码和文档更新都先创建独立分支（Codex 默认使用 `codex/` 前缀），提交并推送后创建草稿 PR。必须等待用户或队友明确审核同意，才能将 PR 合并到 `main`；创建 PR 不代表获得合并许可。
 4. 不要提交 `build/`、`devel/`、`install/`、日志、IDE 配置、压缩包或密钥；遵守根目录 `.gitignore`。
 5. 保持 Python 和 ROS/CMake 文件为 LF 换行，并保留 Python 脚本可执行权限。
 6. 不要硬编码个人电脑路径、Wi-Fi 地址或机载 IP。使用环境变量、ROS 参数或 launch 参数。
