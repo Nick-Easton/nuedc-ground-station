@@ -140,13 +140,13 @@ roslaunch nuedc_ground_air landscreen_ros1_bridge.launch
 
 ```text
 LandScreen -> /mission/forbidden_zones -> ground_path_planner
-ground_path_planner -> /planner/path -> onboard_path_receiver
-/planner/path -> LandScreen bridge -> Qt map
+ground_path_planner -> /mission/global_path -> onboard_path_receiver
+/mission/global_path -> LandScreen bridge -> Qt map
 ```
 
 机载接收节点会通过 `/planner/path_ack` 发布路径校验结果。
 
-规划器生成多组确定性覆盖候选，每段使用四邻域 A* 最短路连接，并按总点数和转弯数选优。禁飞格不会出现在航点中，连续航点只会上下或左右移动；为连接未访问区域或返航，路径可能重复经过自由格。桥回传路径时会附带 `forbidden:[{"a":A,"b":B}]`，LandScreen 据此更新标签并标出禁飞格。
+规划器生成多组确定性覆盖候选，每段使用四邻域 A* 最短路连接，并按总点数和转弯数选优。禁飞格不会出现在航点中；为连接未访问区域或返航，路径可能重复经过自由格。发布到 `/mission/global_path` 时默认只保留直线段起点、终点和转弯点，`frame_id` 为 `mission`，所有航点使用单位四元数，不改变机身航向。桥回传路径时会附带 `forbidden:[{"a":A,"b":B}]`，LandScreen 据此更新标签并标出禁飞格。
 
 当前规划器运行在 NX，因此 UI 必须先连通 NX 才能收到路径。Nano 到 NX 无路由、TCP 8001 未监听或规划节点未启动时，UI 会停在“航线规划中”。
 
@@ -210,6 +210,7 @@ timeout 2 dd if=/dev/ttyUSB0 bs=64 count=1 status=none | wc -c
 
 ```text
 /vision/detections  nuedc_ground_air/Detection2D
+/mission/vision_goal geometry_msgs/PoseStamped
 ```
 
 完整数据流为：
@@ -218,6 +219,7 @@ timeout 2 dd if=/dev/ttyUSB0 bs=64 count=1 status=none | wc -c
 USB Camera -> /usb_cam/image_raw -> yolo_trt_ros
 yolo_trt_ros -> /yolo_trt_node/detections -> vision_detection_adapter
 vision_detection_adapter -> /vision/detections -> landscreen_ros1_bridge
+vision_detection_adapter -> /mission/vision_goal -> onboard subscriber
 landscreen_ros1_bridge -> TCP JSON -> LandScreen 目标信息
 ```
 
@@ -257,7 +259,7 @@ LandScreen 的绿色“发送”按钮只发送禁飞区和任务信息。识别
 
 ## 按格识别状态机
 
-`grid_recognition_state_machine.py` 仅处理视觉统计，不读写飞控、MAVROS 或路径执行指令。收到任务 `START` 后，节点等待 `/current_grid` (`std_msgs/String`) 发布 `A1B1` 这样的格子编号，稳定 0.3 秒后统计 1.0 秒。同一帧内同类检测框用于数量统计，多帧之间取单帧最大数，防止按帧累加。已完成格子会被记录，重复经过时不再上报。结果通过 `/vision/grid_result` 传到 LandScreen。
+`grid_recognition_state_machine.py` 仅处理视觉统计，不读写飞控、MAVROS 或路径执行指令。收到任务 `START` 后，节点等待 `/current_grid` (`std_msgs/String`) 发布 `A1B1` 这样的格子编号，稳定 0.3 秒后统计 1.0 秒。默认至少需要 3 个检测帧支持，并使用支持帧计数的中位值，避免短暂误检和按帧累加。已完成格子会被记录，重复经过时不再上报。结果通过 `/vision/grid_result` 传到 LandScreen。
 
 与飞控/定位开发人员的边界只是一个 ROS 话题：在确认航点到达并稳定后，向 `/current_grid` 发布 `std_msgs/String`。话题名可用私有参数 `~current_grid_topic` 或 launch 参数 `current_grid_topic` 配置，也可使用 ROS remap 接到已有的到点话题。视觉节点不订阅 MAVROS，不发布速度、位置或模式切换指令。
 
@@ -270,7 +272,7 @@ rostopic pub -1 /current_grid std_msgs/String "data: 'A6B1'"
 ## 竞赛参数
 
 - 场地为 9×7 格，每格 `0.5 m`，总尺寸 `4.5 m × 3.5 m`。
-- `/planner/path` 默认高度已设为 `1.2 m`，每个航点的 `z=1.2`。真正保持 `120±10 cm` 仍由后续飞控执行模块负责。
+- `/mission/global_path` 使用起飞点固定坐标系 `mission`。默认 `global_path_use_pose_z=false`，消息中的 `z=0`，执行端统一采用 `takeoff_height=1.2 m`；真正保持 `120±10 cm` 仍由后续飞控执行模块负责。
 - 按格识别默认稳定 `0.3 s`、统计 `1.0 s`，63 格纯视觉时间窗约 `81.9 s`，为 300 秒总时限保留飞行和转弯时间。
 - LandScreen 每次任务会在工程目录生成 `animal_results_yyyyMMdd_HHmmss.csv`，保存时间、格子、动物英文名和数量。
 - 激光笔是独立硬件执行项，当前视觉/规划代码不切换 GPIO 或飞控辅助通道。

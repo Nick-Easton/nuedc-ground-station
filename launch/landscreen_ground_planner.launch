@@ -1,17 +1,26 @@
 <launch>
+  <arg name="host" default="0.0.0.0"/>
+  <arg name="port" default="8001"/>
+  <arg name="grid_spacing" default="0.5"/>
   <arg name="takeoff_height" default="1.2"/>
   <arg name="global_path_use_pose_z" default="false"/>
   <arg name="compress_straight_segments" default="true"/>
-  <arg name="grid_spacing" default="0.5"/>
   <arg name="path_topic" default="/mission/global_path"/>
   <arg name="path_frame" default="mission"/>
 
   <node pkg="nuedc_ground_air" type="ground_path_planner.py" name="ground_path_planner" output="screen">
+    <param name="grid_spacing" value="$(arg grid_spacing)"/>
     <param name="takeoff_height" value="$(arg takeoff_height)"/>
     <param name="global_path_use_pose_z" value="$(arg global_path_use_pose_z)"/>
     <param name="compress_straight_segments" value="$(arg compress_straight_segments)"/>
-    <param name="grid_spacing" value="$(arg grid_spacing)"/>
     <param name="path_topic" value="$(arg path_topic)"/>
     <param name="frame_id" value="$(arg path_frame)"/>
+  </node>
+
+  <node pkg="nuedc_ground_air" type="landscreen_ros1_bridge.py" name="landscreen_ros1_bridge" output="screen">
+    <param name="host" value="$(arg host)"/>
+    <param name="port" value="$(arg port)"/>
+    <param name="grid_mode" value="true"/>
+    <param name="path_topic" value="$(arg path_topic)"/>
   </node>
 </launch>

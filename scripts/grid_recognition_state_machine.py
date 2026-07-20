@@ -20,6 +20,9 @@ class GridRecognitionStateMachine:
         self.stabilize_seconds = float(rospy.get_param("~stabilize_seconds", 0.3))
         self.recognition_seconds = float(rospy.get_param("~recognition_seconds", 1.0))
         self.min_confidence = float(rospy.get_param("~min_confidence", 0.60))
+        self.min_confirmation_frames = max(
+            1, int(rospy.get_param("~min_confirmation_frames", 3))
+        )
         self.current_grid_topic = rospy.get_param("~current_grid_topic", "/current_grid")
         self.detection_topic = rospy.get_param("~detection_topic", "/vision/detections")
 
@@ -120,9 +123,15 @@ class GridRecognitionStateMachine:
         if not self.current_grid:
             return
         counts = {class_name: 0 for class_name in VALID_CLASSES}
-        for frame in self.frame_counts.values():
-            for class_name, count in frame.items():
-                counts[class_name] = max(counts[class_name], count)
+        for class_name in VALID_CLASSES:
+            supported_counts = sorted(
+                frame[class_name]
+                for frame in self.frame_counts.values()
+                if frame[class_name] > 0
+            )
+            if len(supported_counts) < self.min_confirmation_frames:
+                continue
+            counts[class_name] = supported_counts[(len(supported_counts) - 1) // 2]
 
         match = GRID_PATTERN.match(self.current_grid)
         payload = {

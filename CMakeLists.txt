@@ -42,3 +42,8 @@ catkin_install_python(PROGRAMS
   scripts/vision_start_on_command.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
+
+install(PROGRAMS
+  scripts/start_ground_global_path.sh
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
