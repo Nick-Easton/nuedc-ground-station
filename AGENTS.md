@@ -39,7 +39,7 @@
 | `scripts/ground_path_planner.py` | 根据禁区格生成 `/mission/global_path`。它是后台节点，没有窗口。 |
 | `scripts/onboard_path_receiver.py` | 验证收到的路径并发布回执；当前不控制飞行器。 |
 | `scripts/fc_state_bridge.py` | 读取 MAVROS 状态、电池和本地位姿，发布 `/drone/state`；不发送飞控命令。 |
-| `scripts/vision_detection_adapter.py` | 转换 YOLO 检测，发布 `/vision/detections`、`/vision/summary`，并在 3/5 帧确认后发布 `/mission/vision_goal`。 |
+| `scripts/vision_detection_adapter.py` | 转换 YOLO 检测并发布 `/vision/detections`、`/vision/summary`；实验性的 `/mission/vision_goal` 默认关闭，显式启用后还需通过 3/5 帧确认、冷却和空间去重。 |
 | `scripts/vision_start_on_command.py` | 收到 `START` 后启动相机、YOLO 和检测适配器；收到 `STOP` 或终止状态后释放摄像头。 |
 | `LandScreen-master/` | Qt 地图界面和本地假服务器。可执行文件名为 `planescreen`。 |
 | `launch/` | ROS 1 启动文件。 |
@@ -69,7 +69,7 @@ ground_path_planner
 - `/vision/detections`：目标检测。
 - `/drone/state`：飞行器状态，目前主要供 PyQt5 面板显示。
 - `/mission/global_path`：`nav_msgs/Path`，坐标系必须是 `mission`。
-- `/mission/vision_goal`：`geometry_msgs/PoseStamped`，坐标系必须是 `base_link`。
+- `/mission/vision_goal`：实验性 `geometry_msgs/PoseStamped`，坐标系为 `base_link`，默认不发布，未完成标定前禁止用于实机控制。
 - `/planner/path_ack`：机载接收器的 JSON 字符串回执。
 - `/mavros/state`、`/mavros/battery`、`/mavros/local_position/pose`：MAVROS 原始飞控遥测输入。
 - `/yolo_trt_node/detections`：真实 TensorRT YOLO 发布的 `vision_msgs/Detection2DArray`。

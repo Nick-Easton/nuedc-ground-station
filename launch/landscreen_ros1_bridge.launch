@@ -6,6 +6,9 @@
   <arg name="confidence" default="0.60"/>
   <arg name="grid_mode" default="true"/>
   <arg name="current_grid_topic" default="/current_grid"/>
+  <arg name="publish_vision_goal" default="false"/>
+  <arg name="vision_goal_cooldown_seconds" default="2.0"/>
+  <arg name="vision_goal_dedup_distance_px" default="60.0"/>
   <arg name="path_topic" default="/mission/global_path"/>
   <arg name="path_ack_topic" default="/planner/path_ack"/>
   <arg name="path_frame" default="mission"/>
@@ -44,12 +47,19 @@
     <param name="camera" value="$(arg camera)"/>
     <param name="show_window" value="$(arg show_window)"/>
     <param name="confidence" value="$(arg confidence)"/>
+    <param name="publish_vision_goal" value="$(arg publish_vision_goal)"/>
+    <param name="vision_goal_cooldown_seconds" value="$(arg vision_goal_cooldown_seconds)"/>
+    <param name="vision_goal_dedup_distance_px" value="$(arg vision_goal_dedup_distance_px)"/>
   </node>
 
   <node if="$(arg start_vision_adapter)" pkg="nuedc_ground_air" type="vision_detection_adapter.py" name="vision_detection_adapter" output="screen">
     <param name="input_topic" value="/yolo_trt_node/detections"/>
     <param name="output_topic" value="/vision/detections"/>
     <param name="summary_topic" value="/vision/summary"/>
+    <param name="vision_goal_topic" value="/mission/vision_goal"/>
+    <param name="publish_vision_goal" value="$(arg publish_vision_goal)"/>
+    <param name="vision_goal_cooldown_seconds" value="$(arg vision_goal_cooldown_seconds)"/>
+    <param name="vision_goal_dedup_distance_px" value="$(arg vision_goal_dedup_distance_px)"/>
     <param name="min_confidence" value="$(arg confidence)"/>
     <param name="max_rate" value="5.0"/>
     <param name="max_detections" value="10"/>

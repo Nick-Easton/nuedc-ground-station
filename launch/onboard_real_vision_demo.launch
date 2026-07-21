@@ -12,12 +12,15 @@
   <arg name="max_rate" default="5.0"/>
   <arg name="max_detections" default="10"/>
   <arg name="current_grid_topic" default="/current_grid"/>
+  <arg name="publish_vision_goal" default="false"/>
   <arg name="vision_goal_max_forward_step" default="0.20"/>
   <arg name="vision_goal_max_lateral_step" default="0.10"/>
   <arg name="vision_goal_center_deadband_px" default="20.0"/>
   <arg name="vision_goal_confirmation_window_frames" default="5"/>
   <arg name="vision_goal_confirmation_min_frames" default="3"/>
   <arg name="vision_goal_confirmation_center_distance_px" default="40.0"/>
+  <arg name="vision_goal_cooldown_seconds" default="2.0"/>
+  <arg name="vision_goal_dedup_distance_px" default="60.0"/>
   <arg name="grid_min_confirmation_frames" default="3"/>
 
   <include if="$(arg start_yolo)" file="$(find yolo_trt_ros)/launch/yolo_trt_usb_cam.launch">
@@ -36,6 +39,7 @@
     <param name="output_topic" value="/vision/detections"/>
     <param name="summary_topic" value="/vision/summary"/>
     <param name="vision_goal_topic" value="/mission/vision_goal"/>
+    <param name="publish_vision_goal" value="$(arg publish_vision_goal)"/>
     <param name="min_confidence" value="$(arg confidence)"/>
     <param name="max_rate" value="$(arg max_rate)"/>
     <param name="max_detections" value="$(arg max_detections)"/>
@@ -47,6 +51,8 @@
     <param name="vision_goal_confirmation_window_frames" value="$(arg vision_goal_confirmation_window_frames)"/>
     <param name="vision_goal_confirmation_min_frames" value="$(arg vision_goal_confirmation_min_frames)"/>
     <param name="vision_goal_confirmation_center_distance_px" value="$(arg vision_goal_confirmation_center_distance_px)"/>
+    <param name="vision_goal_cooldown_seconds" value="$(arg vision_goal_cooldown_seconds)"/>
+    <param name="vision_goal_dedup_distance_px" value="$(arg vision_goal_dedup_distance_px)"/>
     <rosparam param="class_names">[elephant, tiger, monkey, kongque, wolf]</rosparam>
   </node>
 

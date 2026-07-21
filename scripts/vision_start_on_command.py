@@ -25,11 +25,26 @@ STOP_COMMANDS = {
 }
 
 
+def as_bool(value):
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
 class VisionStartOnCommand:
     def __init__(self):
         self.camera = rospy.get_param("~camera", "/dev/video0")
-        self.show_window = bool(rospy.get_param("~show_window", False))
+        self.show_window = as_bool(rospy.get_param("~show_window", False))
         self.confidence = float(rospy.get_param("~confidence", 0.60))
+        self.publish_vision_goal = as_bool(
+            rospy.get_param("~publish_vision_goal", False)
+        )
+        self.vision_goal_cooldown_seconds = max(
+            0.0, float(rospy.get_param("~vision_goal_cooldown_seconds", 2.0))
+        )
+        self.vision_goal_dedup_distance_px = max(
+            0.0, float(rospy.get_param("~vision_goal_dedup_distance_px", 60.0))
+        )
         self.yolo_setup = os.path.expanduser(
             rospy.get_param(
                 "~yolo_setup", "~/catkin_ws_yolo_trt/devel/setup.bash"
@@ -86,6 +101,15 @@ class VisionStartOnCommand:
                 "camera:={}".format(shlex.quote(self.camera)),
                 "show_window:={}".format("true" if self.show_window else "false"),
                 "confidence:={}".format(self.confidence),
+                "publish_vision_goal:={}".format(
+                    "true" if self.publish_vision_goal else "false"
+                ),
+                "vision_goal_cooldown_seconds:={}".format(
+                    self.vision_goal_cooldown_seconds
+                ),
+                "vision_goal_dedup_distance_px:={}".format(
+                    self.vision_goal_dedup_distance_px
+                ),
                 "start_grid_recognition:=false",
             ]
         )

@@ -210,7 +210,7 @@ timeout 2 dd if=/dev/ttyUSB0 bs=64 count=1 status=none | wc -c
 
 ```text
 /vision/detections  nuedc_ground_air/Detection2D
-/mission/vision_goal geometry_msgs/PoseStamped
+/mission/vision_goal geometry_msgs/PoseStamped（实验性，默认关闭）
 ```
 
 完整数据流为：
@@ -222,6 +222,8 @@ vision_detection_adapter -> /vision/detections -> landscreen_ros1_bridge
 vision_detection_adapter -> /mission/vision_goal -> onboard subscriber
 landscreen_ros1_bridge -> TCP JSON -> LandScreen 目标信息
 ```
+
+`/mission/vision_goal` 不影响地面站类别、数量和方格汇总，且默认不会创建发布器。只有显式设置 `publish_vision_goal:=true` 后才会发布；启用后使用 3/5 帧确认、默认 `2.0 s` 冷却，并对同类别、相近像素位置执行一次性去重。该坐标只是检测框偏差映射出的有限步长，未经过相机标定、距离估计或地面投影，不能直接用于实机飞行追踪。
 
 启动前必须按顺序加载两个工作区；后加载的 `nuedc_ground_air` 工作区会叠加在 YOLO 工作区之上：
 
