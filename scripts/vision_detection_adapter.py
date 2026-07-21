@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 import json
-from collections import Counter
+from collections import Counter, deque
 
 import rospy
+from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
 from vision_msgs.msg import Detection2DArray
 
 from nuedc_ground_air.msg import Detection2D
+
+
+def as_bool(value):
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
 
 
 class VisionDetectionAdapter:
@@ -16,25 +23,83 @@ class VisionDetectionAdapter:
         )
         self.output_topic = rospy.get_param("~output_topic", "/vision/detections")
         self.summary_topic = rospy.get_param("~summary_topic", "/vision/summary")
+        self.vision_goal_topic = rospy.get_param(
+            "~vision_goal_topic", "/mission/vision_goal"
+        )
+        self.publish_vision_goal_enabled = as_bool(
+            rospy.get_param("~publish_vision_goal", False)
+        )
         self.min_confidence = float(rospy.get_param("~min_confidence", 0.60))
         self.max_rate = float(rospy.get_param("~max_rate", 5.0))
         self.max_detections = int(rospy.get_param("~max_detections", 10))
+        self.image_width = float(rospy.get_param("~image_width", 640.0))
+        self.image_height = float(rospy.get_param("~image_height", 480.0))
+        self.max_forward_step = float(
+            rospy.get_param("~vision_goal_max_forward_step", 0.20)
+        )
+        self.max_lateral_step = float(
+            rospy.get_param("~vision_goal_max_lateral_step", 0.10)
+        )
+        self.center_deadband_px = float(
+            rospy.get_param("~vision_goal_center_deadband_px", 20.0)
+        )
+        self.confirmation_window_frames = max(
+            1, int(rospy.get_param("~vision_goal_confirmation_window_frames", 5))
+        )
+        self.confirmation_min_frames = max(
+            1, int(rospy.get_param("~vision_goal_confirmation_min_frames", 3))
+        )
+        self.confirmation_min_frames = min(
+            self.confirmation_min_frames, self.confirmation_window_frames
+        )
+        self.confirmation_center_distance_px = max(
+            0.0,
+            float(
+                rospy.get_param(
+                    "~vision_goal_confirmation_center_distance_px", 40.0
+                )
+            ),
+        )
+        self.vision_goal_cooldown_seconds = max(
+            0.0, float(rospy.get_param("~vision_goal_cooldown_seconds", 2.0))
+        )
+        self.vision_goal_dedup_distance_px = max(
+            0.0, float(rospy.get_param("~vision_goal_dedup_distance_px", 60.0))
+        )
         self.class_names = rospy.get_param(
             "~class_names", ["elephant", "tiger", "monkey", "kongque", "wolf"]
         )
         self.last_publish_time = None
         self.last_summary = None
+        self.last_vision_goal_time = None
+        self.published_vision_goal_signatures = []
+        self.recent_detection_frames = deque(
+            maxlen=self.confirmation_window_frames
+        )
 
         self.publisher = rospy.Publisher(self.output_topic, Detection2D, queue_size=10)
         self.summary_publisher = rospy.Publisher(
             self.summary_topic, String, queue_size=1, latch=True
         )
+        self.vision_goal_publisher = None
+        if self.publish_vision_goal_enabled:
+            self.vision_goal_publisher = rospy.Publisher(
+                self.vision_goal_topic, PoseStamped, queue_size=10
+            )
+            rospy.logwarn(
+                "Experimental vision goals enabled on %s; coordinates are image-derived, not calibrated metric positions.",
+                self.vision_goal_topic,
+            )
         rospy.Subscriber(
             self.input_topic, Detection2DArray, self.on_detections, queue_size=1
         )
         rospy.loginfo(
             "Vision adapter ready: %s -> %s", self.input_topic, self.output_topic
         )
+        if not self.publish_vision_goal_enabled:
+            rospy.loginfo(
+                "Vision goal publishing is disabled; detections and summaries remain active."
+            )
 
     def on_detections(self, msg):
         now = rospy.Time.now()
@@ -64,8 +129,11 @@ class VisionDetectionAdapter:
 
         converted.sort(key=lambda detection: detection.confidence, reverse=True)
         forwarded = converted[: max(0, self.max_detections)]
+        self.recent_detection_frames.append(forwarded)
         for output in forwarded:
             self.publisher.publish(output)
+            if self.should_publish_vision_goal(output, now):
+                self.publish_vision_goal(output, now)
 
         counts = Counter(output.class_name for output in forwarded)
         summary = json.dumps(
@@ -85,6 +153,72 @@ class VisionDetectionAdapter:
                 len(forwarded),
                 self.output_topic,
             )
+
+    def is_temporally_confirmed(self, candidate):
+        max_distance_squared = self.confirmation_center_distance_px ** 2
+        matching_frames = 0
+        for frame in self.recent_detection_frames:
+            for detection in frame:
+                if detection.class_name != candidate.class_name:
+                    continue
+                dx = detection.center_x - candidate.center_x
+                dy = detection.center_y - candidate.center_y
+                if dx * dx + dy * dy <= max_distance_squared:
+                    matching_frames += 1
+                    break
+        return matching_frames >= self.confirmation_min_frames
+
+    def should_publish_vision_goal(self, candidate, stamp):
+        if not self.publish_vision_goal_enabled:
+            return False
+        if not self.is_temporally_confirmed(candidate):
+            return False
+
+        if self.last_vision_goal_time is not None:
+            elapsed = (stamp - self.last_vision_goal_time).to_sec()
+            if elapsed < self.vision_goal_cooldown_seconds:
+                return False
+
+        max_distance_squared = self.vision_goal_dedup_distance_px ** 2
+        for class_name, center_x, center_y in self.published_vision_goal_signatures:
+            if class_name != candidate.class_name:
+                continue
+            dx = center_x - candidate.center_x
+            dy = center_y - candidate.center_y
+            if dx * dx + dy * dy <= max_distance_squared:
+                return False
+
+        return True
+
+    def publish_vision_goal(self, detection, stamp):
+        half_width = max(self.image_width / 2.0, 1.0)
+        half_height = max(self.image_height / 2.0, 1.0)
+        horizontal_error = half_width - detection.center_x
+        vertical_error = half_height - detection.center_y
+
+        if abs(horizontal_error) <= self.center_deadband_px:
+            horizontal_error = 0.0
+        if abs(vertical_error) <= self.center_deadband_px:
+            vertical_error = 0.0
+
+        forward_ratio = max(-1.0, min(1.0, vertical_error / half_height))
+        lateral_ratio = max(-1.0, min(1.0, horizontal_error / half_width))
+
+        goal = PoseStamped()
+        goal.header.stamp = stamp
+        goal.header.frame_id = "base_link"
+        goal.pose.position.x = forward_ratio * self.max_forward_step
+        goal.pose.position.y = lateral_ratio * self.max_lateral_step
+        goal.pose.position.z = 0.0
+        goal.pose.orientation.x = 0.0
+        goal.pose.orientation.y = 0.0
+        goal.pose.orientation.z = 0.0
+        goal.pose.orientation.w = 1.0
+        self.vision_goal_publisher.publish(goal)
+        self.last_vision_goal_time = stamp
+        self.published_vision_goal_signatures.append(
+            (detection.class_name, detection.center_x, detection.center_y)
+        )
 
     def class_name(self, class_id):
         if isinstance(self.class_names, dict):

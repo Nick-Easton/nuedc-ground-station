@@ -19,6 +19,7 @@ class LandScreenRos1Bridge:
         self.last_launch = False
         self.last_forbidden = []
         self.grid_mode = bool(rospy.get_param("~grid_mode", True))
+        self.path_topic = rospy.get_param("~path_topic", "/mission/global_path")
 
         self.zones_pub = rospy.Publisher("/mission/forbidden_zones", ForbiddenZones, queue_size=10)
         self.command_pub = rospy.Publisher("/mission/command", MissionCommand, queue_size=10)
@@ -29,7 +30,7 @@ class LandScreenRos1Bridge:
         rospy.Subscriber("/vision/detections", Detection2D, self.on_detection)
         rospy.Subscriber("/vision/summary", String, self.on_vision_summary)
         rospy.Subscriber("/vision/grid_result", String, self.on_grid_result)
-        rospy.Subscriber("/planner/path", Path, self.on_path)
+        rospy.Subscriber(self.path_topic, Path, self.on_path)
 
     def serve_forever(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

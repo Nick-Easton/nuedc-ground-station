@@ -10,9 +10,18 @@ from std_msgs.msg import String
 class OnboardPathReceiver:
     def __init__(self):
         self.max_points = int(rospy.get_param("~max_points", 500))
-        self.ack_pub = rospy.Publisher("/planner/path_ack", String, queue_size=10, latch=True)
-        rospy.Subscriber("/planner/path", Path, self.on_path)
-        rospy.loginfo("Onboard path receiver ready")
+        self.path_topic = rospy.get_param("~path_topic", "/mission/global_path")
+        self.ack_topic = rospy.get_param("~ack_topic", "/planner/path_ack")
+        self.frame_id = rospy.get_param("~frame_id", "mission")
+        self.ack_pub = rospy.Publisher(
+            self.ack_topic, String, queue_size=10, latch=True
+        )
+        rospy.Subscriber(self.path_topic, Path, self.on_path)
+        rospy.loginfo(
+            "Onboard path receiver ready: path_topic=%s frame_id=%s",
+            self.path_topic,
+            self.frame_id,
+        )
 
     def on_path(self, msg):
         accepted, reason = self.validate(msg)
@@ -30,8 +39,8 @@ class OnboardPathReceiver:
             rospy.logwarn("Rejected ground path: %s", reason)
 
     def validate(self, msg):
-        if msg.header.frame_id != "map":
-            return False, "frame_id must be map"
+        if msg.header.frame_id != self.frame_id:
+            return False, "frame_id must be {}".format(self.frame_id)
         if not msg.poses:
             return False, "path is empty"
         if len(msg.poses) > self.max_points:

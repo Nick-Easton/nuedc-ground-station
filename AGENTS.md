@@ -36,10 +36,10 @@
 | `scripts/ground_station_cli.py` | 终端版任务控制和状态显示。 |
 | `scripts/ground_station_gui.py` | PyQt5 状态面板；它不是路径地图界面。 |
 | `scripts/landscreen_ros1_bridge.py` | TCP 8001 与 ROS topics 之间的 JSON 桥。 |
-| `scripts/ground_path_planner.py` | 根据禁区格生成 `/planner/path`。它是后台节点，没有窗口。 |
+| `scripts/ground_path_planner.py` | 根据禁区格生成 `/mission/global_path`。它是后台节点，没有窗口。 |
 | `scripts/onboard_path_receiver.py` | 验证收到的路径并发布回执；当前不控制飞行器。 |
 | `scripts/fc_state_bridge.py` | 读取 MAVROS 状态、电池和本地位姿，发布 `/drone/state`；不发送飞控命令。 |
-| `scripts/vision_detection_adapter.py` | 将 `/yolo_trt_node/detections` 转换为 `/vision/detections` 和 `/vision/summary`，并限制转发速率和单帧数量。 |
+| `scripts/vision_detection_adapter.py` | 转换 YOLO 检测并发布 `/vision/detections`、`/vision/summary`；实验性的 `/mission/vision_goal` 默认关闭，显式启用后还需通过 3/5 帧确认、冷却和空间去重。 |
 | `scripts/vision_start_on_command.py` | 收到 `START` 后启动相机、YOLO 和检测适配器；收到 `STOP` 或终止状态后释放摄像头。 |
 | `LandScreen-master/` | Qt 地图界面和本地假服务器。可执行文件名为 `planescreen`。 |
 | `launch/` | ROS 1 启动文件。 |
@@ -56,7 +56,7 @@ LandScreen Qt 地图界面
 landscreen_ros1_bridge
   -> /mission/forbidden_zones
 ground_path_planner
-  -> /planner/path
+  -> /mission/global_path
   -> onboard_path_receiver（仅验证和回执）
   -> landscreen_ros1_bridge（把路径回传到地图显示）
 ```
@@ -68,7 +68,8 @@ ground_path_planner
 - `/mission/forbidden_zones`：地图选出的最多三个禁区格。
 - `/vision/detections`：目标检测。
 - `/drone/state`：飞行器状态，目前主要供 PyQt5 面板显示。
-- `/planner/path`：`nav_msgs/Path`，坐标系必须是 `map`。
+- `/mission/global_path`：`nav_msgs/Path`，坐标系必须是 `mission`。
+- `/mission/vision_goal`：实验性 `geometry_msgs/PoseStamped`，坐标系为 `base_link`，默认不发布，未完成标定前禁止用于实机控制。
 - `/planner/path_ack`：机载接收器的 JSON 字符串回执。
 - `/mavros/state`、`/mavros/battery`、`/mavros/local_position/pose`：MAVROS 原始飞控遥测输入。
 - `/yolo_trt_node/detections`：真实 TensorRT YOLO 发布的 `vision_msgs/Detection2DArray`。
@@ -162,7 +163,7 @@ roslaunch nuedc_ground_air onboard_real_vision_demo.launch start_yolo:=false
 - 默认网格间距为 `0.5 m`，比赛航线高度为 `1.2 m`，可通过 launch 参数修改。
 - `onboard_path_receiver.py` 只检查 `frame_id`、空路径、点数和有限坐标，不会向飞控发送航点。
 - `fc_state_bridge.py` 只读取遥测并发布 `/drone/state`，不会解锁、切换模式、起飞或发送设定值。
-- `vision_detection_adapter.py` 只转换检测框消息；当前没有深度融合、相机标定投影或真实地理坐标估计。
+- `vision_detection_adapter.py` 发布经过多帧确认的图像相对平移目标；当前没有深度融合、相机标定投影或真实地理坐标估计。
 - `fake_yolo_node.py` 是模拟数据源，不代表真实识别效果。
 - 桥接节点把图像检测中心按简单比例映射到演示场地，这是占位定位逻辑，不是真实目标地理定位。
 - `launch=true` 只在从 false 变为 true 的上升沿触发一次 `START`；回到 false 时触发一次 `STOP`。集成 launch 让按格状态机常驻等待命令，摄像头、YOLO 和检测适配器按任务启停。

@@ -2,7 +2,6 @@
 """Four-neighbour coverage planning for the 9 x 7 competition map."""
 
 import heapq
-import math
 import random
 
 import rospy
@@ -156,13 +155,45 @@ def build_coverage_route(forbidden):
     return best_route, free_cells
 
 
+def compress_straight_segments(route):
+    """Keep only endpoints of straight four-neighbour route segments."""
+    if len(route) < 3:
+        return list(route)
+
+    compressed = [route[0]]
+    previous_direction = None
+    for index in range(1, len(route)):
+        previous = route[index - 1]
+        current = route[index]
+        direction = (current[0] - previous[0], current[1] - previous[1])
+        if previous_direction is not None and direction != previous_direction:
+            compressed.append(previous)
+        previous_direction = direction
+
+    compressed.append(route[-1])
+    return compressed
+
+
 class GroundPathPlanner:
     def __init__(self):
-        self.altitude = float(rospy.get_param("~altitude", 1.2))
+        legacy_altitude = float(rospy.get_param("~altitude", 1.2))
+        self.takeoff_height = float(
+            rospy.get_param("~takeoff_height", legacy_altitude)
+        )
+        self.use_pose_z = bool(rospy.get_param("~global_path_use_pose_z", False))
+        self.compress_route = bool(
+            rospy.get_param("~compress_straight_segments", True)
+        )
         self.spacing = float(rospy.get_param("~grid_spacing", 0.5))
-        self.path_pub = rospy.Publisher("/planner/path", Path, queue_size=1, latch=True)
+        self.path_topic = rospy.get_param("~path_topic", "/mission/global_path")
+        self.frame_id = rospy.get_param("~frame_id", "mission")
+        self.path_pub = rospy.Publisher(self.path_topic, Path, queue_size=1, latch=True)
         rospy.Subscriber("/mission/forbidden_zones", ForbiddenZones, self.on_zones)
-        rospy.loginfo("A* ground planner ready; start/end cell is A9,B1")
+        rospy.loginfo(
+            "A* ground planner ready: topic=%s frame=%s start/end=A9B1",
+            self.path_topic,
+            self.frame_id,
+        )
 
     def on_zones(self, msg):
         forbidden = {
@@ -172,34 +203,43 @@ class GroundPathPlanner:
         }
         path = Path()
         path.header.stamp = rospy.Time.now()
-        path.header.frame_id = "map"
+        path.header.frame_id = self.frame_id
 
         try:
-            cells, free_cells = build_coverage_route(forbidden)
+            full_cells, free_cells = build_coverage_route(forbidden)
         except ValueError as error:
             rospy.logerr("Cannot plan route: %s", error)
             self.path_pub.publish(path)
             return
 
-        for index, (a, b) in enumerate(cells):
+        cells = (
+            compress_straight_segments(full_cells)
+            if self.compress_route
+            else full_cells
+        )
+
+        for a, b in cells:
             pose = PoseStamped()
             pose.header = path.header
             pose.pose.position.x = (b - 1) * self.spacing
             pose.pose.position.y = (9 - a) * self.spacing
-            pose.pose.position.z = self.altitude
+            pose.pose.position.z = self.takeoff_height if self.use_pose_z else 0.0
 
-            next_a, next_b = cells[min(index + 1, len(cells) - 1)]
-            next_x = (next_b - 1) * self.spacing
-            next_y = (9 - next_a) * self.spacing
-            yaw = math.atan2(next_y - pose.pose.position.y, next_x - pose.pose.position.x)
-            pose.pose.orientation.z = math.sin(yaw / 2.0)
-            pose.pose.orientation.w = math.cos(yaw / 2.0)
+            # Translation-only mission: preserve the takeoff heading at every waypoint.
+            pose.pose.orientation.x = 0.0
+            pose.pose.orientation.y = 0.0
+            pose.pose.orientation.z = 0.0
+            pose.pose.orientation.w = 1.0
             path.poses.append(pose)
 
         self.path_pub.publish(path)
         rospy.loginfo(
-            "Published A* coverage route: %d points, %d free cells, forbidden=%s, return=%s",
-            len(path.poses), len(free_cells), sorted(forbidden), cells[-1] == START_CELL,
+            "Published A* route: %d/%d points, %d free cells, forbidden=%s, return=%s",
+            len(path.poses),
+            len(full_cells),
+            len(free_cells),
+            sorted(forbidden),
+            full_cells[-1] == START_CELL,
         )
 
 

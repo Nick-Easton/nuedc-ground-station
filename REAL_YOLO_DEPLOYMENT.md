@@ -70,10 +70,17 @@ The managed child process sources the workspaces in this order: ROS Noetic, `cat
 /vision/detections                nuedc_ground_air/Detection2D
 /vision/summary                   std_msgs/String (JSON)
 /vision/grid_result               std_msgs/String (JSON)
+/mission/vision_goal              geometry_msgs/PoseStamped, frame_id=base_link (disabled by default)
 /current_grid                     std_msgs/String, for example A3B4
-/planner/path                     nav_msgs/Path
+/mission/global_path              nav_msgs/Path, frame_id=mission
 /planner/path_ack                 std_msgs/String (JSON)
 ```
+
+`mission` is fixed when the mission starts: its origin is the A9B1 takeoff point,
+x points forward along the takeoff heading, y points left, and z points up. The
+default `global_path_use_pose_z=false` publishes zero for every path pose z;
+the flight executor should use `takeoff_height=1.2` m instead. When enabled,
+the planner writes that height into each pose z.
 
 Example summary:
 
@@ -90,6 +97,17 @@ rostopic pub -1 /current_grid std_msgs/String "data: 'A3B4'"
 ```
 
 The grid state machine waits for stable hover, samples detections, publishes one result per grid, and prevents duplicate records for the same grid during one mission.
+
+The vision adapter does not advertise or publish `/mission/vision_goal` unless
+`publish_vision_goal:=true` is explicitly set. When enabled, the same class must
+be observed near the same image position in at least 3 of the latest 5 processed
+frames. The default confirmation radius is 40 pixels, publishing cooldown is
+2 seconds, and a same-class target within 60 pixels is emitted only once during
+the vision process. The goal contains a bounded image-derived translation in
+`base_link`; it keeps z at zero and uses the identity quaternion. It is not a
+calibrated metric position and must not drive real flight before camera
+calibration, distance estimation, ground projection, and frame transformation
+are complete. Grid counts likewise require support from at least three frames.
 
 ## Verification
 
