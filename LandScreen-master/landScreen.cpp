@@ -1,4 +1,5 @@
 #include "landScreen.h"
+#include "carControlDialog.h"
 #include <QDebug>
 #include <QImage>
 #include <QPixmap>
@@ -571,8 +572,30 @@ void LandScreen::CreateUI()
     connect(connectionSettingsButton, &QPushButton::clicked,
             this, &LandScreen::showConnectionSettings);
 
+    carControlButton = new QPushButton(QStringLiteral("小车控制"), bottomWidget);
+    carControlButton->setMinimumSize(120, 40);
+    carControlButton->setStyleSheet(
+        "QPushButton {"
+        "    background-color: #1677C8;"
+        "    color: white;"
+        "    font-size: 16px;"
+        "    font-weight: bold;"
+        "    border-radius: 5px;"
+        "    padding: 6px 12px;"
+        "}"
+        "QPushButton:hover { background-color: #0E609F; }"
+    );
+    connect(carControlButton, &QPushButton::clicked, this, [this]() {
+        if (!carControlDialog)
+            carControlDialog = new CarControlDialog(this);
+        carControlDialog->showFullScreen();
+        carControlDialog->raise();
+        carControlDialog->activateWindow();
+    });
+
     summaryLayout->addWidget(labelTargetSummary);
     summaryLayout->addWidget(connectStatusLabel);
+    summaryLayout->addWidget(carControlButton);
     summaryLayout->addWidget(connectionSettingsButton);
     summaryLayout->addWidget(showTargetInfoButton);
 

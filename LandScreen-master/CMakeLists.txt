@@ -19,6 +19,8 @@ add_executable(planescreen
   blink.h
   landScreen.cpp
   landScreen.h
+  carControlDialog.cpp
+  carControlDialog.h
   TargetInfo.cpp
   TargetInfo.h
 )

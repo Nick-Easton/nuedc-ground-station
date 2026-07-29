@@ -3,10 +3,17 @@
 #include <QSize>      // 用于设置固定尺寸
 #include "landScreen.h"
 #include "TargetInfo.h"
+#include "carControlDialog.h"
 
 int main(int argc, char* argv[])
 {
     QApplication a(argc, argv);
+
+    if (!qgetenv("LANDSCREEN_CAR_CONTROL_ONLY").isEmpty()) {
+        CarControlDialog carWindow;
+        carWindow.showFullScreen();
+        return a.exec();
+    }
     
     LandScreen homeWindow;
     

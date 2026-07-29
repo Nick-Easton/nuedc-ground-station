@@ -20,6 +20,7 @@
 #define SERVER_PORT 8001
 #define OFFSET_X 0.25
 #define OFFSET_Y 0.25
+class CarControlDialog;
 struct Point
 {
     qint8 a;
@@ -55,6 +56,8 @@ private:
     QLabel *labelF3 = nullptr;
     QLabel* connectStatusLabel = nullptr; // 新增：连接状态标签
     QPushButton *connectionSettingsButton = nullptr;
+    QPushButton *carControlButton = nullptr;
+    CarControlDialog *carControlDialog = nullptr;
 
     // 发送和取消按钮
     QPushButton *sendButton = nullptr;
