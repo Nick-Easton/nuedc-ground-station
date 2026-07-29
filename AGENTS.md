@@ -42,6 +42,8 @@
 | `scripts/vision_detection_adapter.py` | 将 `/yolo_trt_node/detections` 转换为 `/vision/detections` 和 `/vision/summary`，并限制转发速率和单帧数量。 |
 | `scripts/vision_start_on_command.py` | 收到 `START` 后启动相机、YOLO 和检测适配器；收到 `STOP` 或终止状态后释放摄像头。 |
 | `LandScreen-master/` | Qt 地图界面和本地假服务器。可执行文件名为 `planescreen`。 |
+| `LandScreen-master/carControlDialog.*` | Nano 本机 C07A 串口状态、电机安全使能和触控摇杆；不经过 ROS/NX。 |
+| `LandScreen-master/tools/fake_car_controller.py` | 使用 Linux 伪终端模拟 C07A 遥测、ACK、电机状态和看门狗。 |
 | `launch/` | ROS 1 启动文件。 |
 | `msg/` | ROS 1 自定义消息。修改后必须重新运行 `catkin_make`。 |
 | `systemd/`、`tools/install_onboard_user_service.sh` | NX 用户级一体化服务及安装脚本；用于登录后自动启动和异常重启。 |
@@ -169,6 +171,8 @@ roslaunch nuedc_ground_air onboard_real_vision_demo.launch start_yolo:=false
 - TCP 协议是一行一个 JSON；修改任一端协议时必须同时修改另一端并保留换行分隔。
 - 路径回传 JSON 的 `forbidden` 是可选数组，元素格式为 `{"a":1..9,"b":1..7}`；LandScreen 用它同步标签和禁飞格覆盖层，旧客户端可忽略。
 - 尚未实现真实飞控桥、真实相机定位、完整安全状态机和实际路径执行闭环。
+- 小车 UI 目前显示编码器累计计数；65 mm 轮径已知，但每轮计数和安装方向尚未实测标定，因此不得把计数换算成未经验证的 m/s。
+- 人工小车摇杆仅用于调试；自动比赛模式会锁定摇杆。C07A 电机固件必须保持上电未使能、300 ms 命令看门狗、40% 硬限幅和急停撤销使能，不能仅依赖 UI 安全逻辑。
 
 ## 修改规则
 
@@ -221,6 +225,8 @@ YYYY-MM-DD | 作者/分支 | 变更摘要 | 已执行的验证 | 已知问题
 
 当前记录：
 
+- 2026-07-29 | `codex/car-control-ui` | Qt 程序默认直接进入小车控制界面，移除 2025 任务地图启动路径，新增安全关闭按钮；C07A 电机状态协议增加 PA15 ADC 电池毫伏值，UI 显示真实电机供电电压并兼容旧 16 字节状态帧 | 3 项 Python 协议测试、Nano Qt 5.12 Release 构建、1600×1200 实际桌面截图、关闭按钮退出与重新启动、Keil 固件 0 错误 0 警告通过 | Nano 当前仍烧录旧 16 字节固件，因此界面显示“固件未上报”；烧录 v2 后须用万用表校准电压，当前不在电池串数未知时换算百分比
+- 2026-07-29 | `codex/car-control-ui` | LandScreen 新增 Nano 直连 C07A 的小车状态、电机长按使能、15%~40% 限幅、20 Hz 触控摇杆、急停与串口设置；新增伪终端控制板和协议测试，并配套带 CRC/序号/300 ms 看门狗的 MSPM0 固件 | Keil 固件 0 错误 0 警告；Nano Qt 5.12 Release 构建、1280x720 offscreen 运行与截图、100 Hz/10 Hz 伪串口状态解析、Python compileall、2 项协议测试和 Git 空白检查通过 | 尚未烧录本版电机固件；架空实车左右轮方向、松手停车、拔线看门狗和急停验收待执行；未标定编码器每轮计数。
 - 2026-07-17 | `feature/real-yolo` | 审查并整合队友 `agent/ros-yolo-ground-station-integration`：新增实时 `/vision/summary`、UI 识别启停和未定位目标展示；修复按格节点错过 START、后台预览默认开启、工作区加载顺序和终止状态重复 STOP | Python 编译、XML 解析、Git 空白及 START/STOP 模拟生命周期检查通过；队友此前已完成 NX 启停与 Qt 构建验证 | 本轮两台 Jetson 因热点离线，尚未对整合结果重新执行远程 catkin_make 和 Qt 构建。
 - 2026-07-17 | `feature/real-yolo` | 修复 Qt 规划状态无法取消/失败不复位、桥空闲约 60 秒退出和 NX 一体化 launch 未部署的问题；新增用户级自动启动服务 | Nano Qt 构建、NX catkin_make、桥持续运行且无重启、TCP 三禁区返回 63 点路径通过 | 手机热点实测平均延迟约 600-825 ms 且有丢包，NoMachine 交互仍受网络质量限制。
 - 2026-07-16 | `feature/real-yolo` | 合并 `agent/contest-ground-station-integration`，保留真实 YOLO 参数、只读 MAVROS 参数和禁飞格覆盖层，并接入 A* 闭合覆盖、按格识别、CSV 与连接设置 | Python 编译、launch/package XML、Git 空白和代表性路径约束检查通过 | 当前无法通过 SSH 登录 Jetson，尚未对合并结果重新执行 catkin_make 和 Qt 构建。

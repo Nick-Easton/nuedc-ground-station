@@ -15,12 +15,8 @@ find_package(Qt${QT_VERSION_MAJOR} COMPONENTS
 
 add_executable(planescreen
   main.cpp
-  blink.cpp
-  blink.h
-  landScreen.cpp
-  landScreen.h
-  TargetInfo.cpp
-  TargetInfo.h
+  carControlDialog.cpp
+  carControlDialog.h
 )
 
 target_link_libraries(planescreen
