@@ -29,6 +29,7 @@ FRAME_ACK = 0x90
 ARM_GUARD = 0xA55A
 MAX_COMMAND = 400
 WATCHDOG_SECONDS = 0.300
+BATTERY_MILLIVOLTS = 12_300
 
 
 def crc16(data):
@@ -195,10 +196,10 @@ class FakeController:
         remaining = max(0, int((WATCHDOG_SECONDS - (now - self.last_drive)) * 1000)) \
             if self.armed else 0
         payload = struct.pack(
-            "<HHhhhhHBB", bits, self.last_command_sequence,
+            "<HHhhhhHBBH", bits, self.last_command_sequence,
             self.target_left, self.target_right,
             self.applied_left, self.applied_right,
-            remaining, self.stop_reason, 40)
+            remaining, self.stop_reason, 40, BATTERY_MILLIVOLTS)
         return make_frame(FRAME_MOTOR_STATUS, payload)
 
 

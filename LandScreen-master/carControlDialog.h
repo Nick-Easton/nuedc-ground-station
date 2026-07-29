@@ -48,6 +48,7 @@ struct CarMotorStatus
     quint16 watchdogRemainingMs = 0;
     quint8 stopReason = 0;
     quint8 maxCommandPercent = 0;
+    quint16 batteryMillivolts = 0;
 };
 
 class CarSerialLink : public QObject
@@ -156,7 +157,7 @@ private slots:
     void sendArmAfterLongPress();
     void emergencyStop();
     void showSerialSettings();
-    void returnToMap();
+    void closeInterface();
 
 private:
     static QLabel *makeValueLabel(const QString &text, QWidget *parent);
@@ -190,6 +191,7 @@ private:
     QLabel *m_targetValue = nullptr;
     QLabel *m_appliedValue = nullptr;
     QLabel *m_watchdogValue = nullptr;
+    QLabel *m_batteryValue = nullptr;
     QLabel *m_stateBanner = nullptr;
     QLabel *m_checkSerial = nullptr;
     QLabel *m_checkCalibration = nullptr;

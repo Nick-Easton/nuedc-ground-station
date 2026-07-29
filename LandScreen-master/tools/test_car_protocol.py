@@ -11,6 +11,7 @@ from fake_car_controller import (  # noqa: E402
     FRAME_ACK,
     FRAME_ARM,
     FRAME_DRIVE,
+    FRAME_MOTOR_STATUS,
     FrameParser,
     FakeController,
     make_frame,
@@ -41,6 +42,14 @@ class CarProtocolTest(unittest.TestCase):
         self.assertFalse(controller.armed)
         self.assertTrue(controller.watchdog_tripped)
         self.assertEqual(controller.stop_reason, 4)
+
+    def test_motor_status_contains_battery_millivolts(self):
+        controller = FakeController(calibration_seconds=0.05)
+        frame = controller.motor_status_frame(controller.started + 0.06)
+        frame_type, payload = FrameParser().feed(frame)[0]
+        self.assertEqual(frame_type, FRAME_MOTOR_STATUS)
+        self.assertEqual(len(payload), 18)
+        self.assertEqual(struct.unpack_from("<H", payload, 16)[0], 12_300)
 
 
 if __name__ == "__main__":

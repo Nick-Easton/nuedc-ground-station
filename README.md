@@ -122,16 +122,15 @@ cd ~/LandScreen-master/build
 ./planescreen
 ```
 
-LandScreen 下方新增“小车控制”入口。该页面在 Nano 本机通过 USB 串口直接连接
-C07A，不经过 NX 或 ROS；默认端口为 `/dev/ttyACM0`，推荐在页面内保存
+`planescreen` 启动后直接进入小车控制界面，不再显示 2025 年题目的任务地图。
+该界面在 Nano 本机通过 USB 串口直接连接 C07A，不经过 NX 或 ROS；默认端口为
+`/dev/ttyACM0`，推荐在页面内保存
 `/dev/serial/by-id/...` 稳定路径，或用 `CAR_SERIAL_PORT` 指定。页面提供 C07A
-状态、IMU 校准、编码器累计值、电机使能、15%~40% 调试限幅、触控摇杆和急停。
+状态、IMU 校准、电机电池实测电压、编码器累计值、电机使能、15%~40% 调试限幅、
+触控摇杆、急停和安全关闭按钮。
 电机需要长按 2 秒使能，UI 以 20 Hz 刷新命令；控制板 300 ms 未收到新命令会自动
 停车并撤销使能。自动比赛模式会锁定人工摇杆。协议、模拟器和架空验收顺序见
 [`docs/小车控制与C07A串口协议.md`](docs/小车控制与C07A串口协议.md)。
-需要把 Nano 临时作为纯小车调试终端时，可使用
-`LANDSCREEN_CAR_CONTROL_ONLY=1 ./planescreen` 直接进入该页面；比赛常规启动不设置
-此变量，仍先显示任务地图。
 
 首次启动时在 UI 右下角“连接设置”填写 NX 的 IP 和端口 8001；配置由 `QSettings` 保存，修改 IP 不需要重新编译。也可以用 `LANDSCREEN_SERVER_IP` 和 `LANDSCREEN_SERVER_PORT` 提供首次默认值。
 

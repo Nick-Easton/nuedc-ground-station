@@ -225,6 +225,7 @@ YYYY-MM-DD | 作者/分支 | 变更摘要 | 已执行的验证 | 已知问题
 
 当前记录：
 
+- 2026-07-29 | `codex/car-control-ui` | Qt 程序默认直接进入小车控制界面，移除 2025 任务地图启动路径，新增安全关闭按钮；C07A 电机状态协议增加 PA15 ADC 电池毫伏值，UI 显示真实电机供电电压并兼容旧 16 字节状态帧 | 3 项 Python 协议测试、Nano Qt 5.12 Release 构建、1600×1200 实际桌面截图、关闭按钮退出与重新启动、Keil 固件 0 错误 0 警告通过 | Nano 当前仍烧录旧 16 字节固件，因此界面显示“固件未上报”；烧录 v2 后须用万用表校准电压，当前不在电池串数未知时换算百分比
 - 2026-07-29 | `codex/car-control-ui` | LandScreen 新增 Nano 直连 C07A 的小车状态、电机长按使能、15%~40% 限幅、20 Hz 触控摇杆、急停与串口设置；新增伪终端控制板和协议测试，并配套带 CRC/序号/300 ms 看门狗的 MSPM0 固件 | Keil 固件 0 错误 0 警告；Nano Qt 5.12 Release 构建、1280x720 offscreen 运行与截图、100 Hz/10 Hz 伪串口状态解析、Python compileall、2 项协议测试和 Git 空白检查通过 | 尚未烧录本版电机固件；架空实车左右轮方向、松手停车、拔线看门狗和急停验收待执行；未标定编码器每轮计数。
 - 2026-07-17 | `feature/real-yolo` | 审查并整合队友 `agent/ros-yolo-ground-station-integration`：新增实时 `/vision/summary`、UI 识别启停和未定位目标展示；修复按格节点错过 START、后台预览默认开启、工作区加载顺序和终止状态重复 STOP | Python 编译、XML 解析、Git 空白及 START/STOP 模拟生命周期检查通过；队友此前已完成 NX 启停与 Qt 构建验证 | 本轮两台 Jetson 因热点离线，尚未对整合结果重新执行远程 catkin_make 和 Qt 构建。
 - 2026-07-17 | `feature/real-yolo` | 修复 Qt 规划状态无法取消/失败不复位、桥空闲约 60 秒退出和 NX 一体化 launch 未部署的问题；新增用户级自动启动服务 | Nano Qt 构建、NX catkin_make、桥持续运行且无重启、TCP 三禁区返回 63 点路径通过 | 手机热点实测平均延迟约 600-825 ms 且有丢包，NoMachine 交互仍受网络质量限制。

@@ -405,7 +405,8 @@ void CarSerialLink::handleFrame(quint8 type, const QByteArray &payload)
         telemetry.calibrationPercent =
             static_cast<quint8>(payload.at(30));
         emit telemetryReceived(telemetry);
-    } else if (type == kFrameMotorStatus && payload.size() == 16) {
+    } else if (type == kFrameMotorStatus &&
+               (payload.size() == 16 || payload.size() == 18)) {
         CarMotorStatus status;
         status.statusBits = readU16(payload, 0);
         status.lastSequence = readU16(payload, 2);
@@ -416,6 +417,8 @@ void CarSerialLink::handleFrame(quint8 type, const QByteArray &payload)
         status.watchdogRemainingMs = readU16(payload, 12);
         status.stopReason = static_cast<quint8>(payload.at(14));
         status.maxCommandPercent = static_cast<quint8>(payload.at(15));
+        if (payload.size() == 18)
+            status.batteryMillivolts = readU16(payload, 16);
         emit motorStatusReceived(status);
     } else if (type == kFrameCommandAck && payload.size() == 4) {
         emit commandAcknowledged(static_cast<quint8>(payload.at(0)),
@@ -643,11 +646,12 @@ void CarControlDialog::buildUi()
     QHBoxLayout *top = new QHBoxLayout(topBar);
     top->setContentsMargins(12, 8, 12, 8);
     top->setSpacing(14);
-    QPushButton *backButton = new QPushButton(QStringLiteral("← 返回任务地图"), topBar);
-    backButton->setStyleSheet(QStringLiteral(
-        "background:#E8F1F8; color:#155E91; border:1px solid #B9D4E6;"));
-    connect(backButton, &QPushButton::clicked,
-            this, &CarControlDialog::returnToMap);
+    QPushButton *closeButton = new QPushButton(QStringLiteral("关闭界面"), topBar);
+    closeButton->setMinimumWidth(120);
+    closeButton->setStyleSheet(QStringLiteral(
+        "background:#5F6B7A; color:white; border:1px solid #45515E;"));
+    connect(closeButton, &QPushButton::clicked,
+            this, &CarControlDialog::closeInterface);
     QLabel *title = new QLabel(QStringLiteral("小车控制"), topBar);
     title->setStyleSheet(QStringLiteral(
         "font-size:26px; font-weight:800; color:#1F2D38;"));
@@ -672,7 +676,7 @@ void CarControlDialog::buildUi()
         "font-size:20px; font-weight:800;"));
     connect(m_emergencyButton, &QPushButton::clicked,
             this, &CarControlDialog::emergencyStop);
-    top->addWidget(backButton);
+    top->addWidget(closeButton);
     top->addWidget(title);
     top->addWidget(subtitle);
     top->addStretch();
@@ -706,12 +710,13 @@ void CarControlDialog::buildUi()
     addStatus(0, QStringLiteral("串口"), m_serialValue);
     addStatus(1, QStringLiteral("控制固件"), m_firmwareValue);
     addStatus(2, QStringLiteral("IMU 校准"), m_calibrationValue);
-    addStatus(3, QStringLiteral("遥测速率"), m_telemetryRateValue);
-    addStatus(4, QStringLiteral("左编码器累计"), m_encoderLeftValue);
-    addStatus(5, QStringLiteral("右编码器累计"), m_encoderRightValue);
-    addStatus(6, QStringLiteral("目标 PWM"), m_targetValue);
-    addStatus(7, QStringLiteral("实际 PWM"), m_appliedValue);
-    addStatus(8, QStringLiteral("看门狗余量"), m_watchdogValue);
+    addStatus(3, QStringLiteral("电机电池"), m_batteryValue);
+    addStatus(4, QStringLiteral("遥测速率"), m_telemetryRateValue);
+    addStatus(5, QStringLiteral("左编码器累计"), m_encoderLeftValue);
+    addStatus(6, QStringLiteral("右编码器累计"), m_encoderRightValue);
+    addStatus(7, QStringLiteral("目标 PWM"), m_targetValue);
+    addStatus(8, QStringLiteral("实际 PWM"), m_appliedValue);
+    addStatus(9, QStringLiteral("看门狗余量"), m_watchdogValue);
     statusLayout->addLayout(statusGrid);
     statusLayout->addStretch();
     QPushButton *serialSettings = new QPushButton(
@@ -824,6 +829,7 @@ void CarControlDialog::onSerialStateChanged(bool open, const QString &detail)
         m_telemetryAge.invalidate();
         m_motorStatusAge.invalidate();
         m_joystick->reset();
+        m_batteryValue->setText(QStringLiteral("--"));
     }
     refreshSafetyState();
 }
@@ -862,7 +868,8 @@ void CarControlDialog::onMotorStatus(const CarMotorStatus &status)
     m_armed = (status.statusBits & kMotorArmed) != 0;
     if (m_armed)
         m_armPending = false;
-    m_firmwareValue->setText(QStringLiteral("控制版 v1"));
+    m_firmwareValue->setText(status.batteryMillivolts > 0
+        ? QStringLiteral("控制版 v2") : QStringLiteral("控制版 v1"));
     m_targetValue->setText(QStringLiteral("%1 / %2‰")
         .arg(status.targetLeft).arg(status.targetRight));
     m_appliedValue->setText(QStringLiteral("%1 / %2‰")
@@ -870,6 +877,16 @@ void CarControlDialog::onMotorStatus(const CarMotorStatus &status)
     m_watchdogValue->setText(m_armed
         ? QStringLiteral("%1 ms").arg(status.watchdogRemainingMs)
         : QStringLiteral("已停止"));
+    if (status.batteryMillivolts > 0) {
+        m_batteryValue->setText(QStringLiteral("%1 V")
+            .arg(status.batteryMillivolts / 1000.0, 0, 'f', 2));
+        m_batteryValue->setToolTip(QStringLiteral(
+            "C07A PA15 ADC 实测电机供电电压；首次使用请与万用表校准。"));
+    } else {
+        m_batteryValue->setText(QStringLiteral("固件未上报"));
+        m_batteryValue->setToolTip(QStringLiteral(
+            "旧版 16 字节电机状态帧不包含电池电压。"));
+    }
 
     if ((status.statusBits & kMotorWatchdogTripped) != 0) {
         m_noticeLabel->setText(QStringLiteral(
@@ -1147,10 +1164,11 @@ void CarControlDialog::showSerialSettings()
     }
 }
 
-void CarControlDialog::returnToMap()
+void CarControlDialog::closeInterface()
 {
-    requestStop(2, false);
-    hide();
+    requestStop(2, true);
+    m_noticeLabel->setText(QStringLiteral("正在安全停车并关闭界面…"));
+    QTimer::singleShot(150, this, &QDialog::close);
 }
 
 QString CarControlDialog::stopReasonText(quint8 reason)
