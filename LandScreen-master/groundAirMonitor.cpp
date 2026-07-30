@@ -14,9 +14,11 @@
 #include <QLineF>
 #include <QLineEdit>
 #include <QMap>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
+#include <QPolygonF>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
@@ -25,6 +27,8 @@
 #include <QTextEdit>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QVector4D>
+#include <QWheelEvent>
 #include <QtMath>
 #include <algorithm>
 #include <cmath>
@@ -60,7 +64,7 @@ double number(const QJsonObject &object, const QStringList &keys, double fallbac
     return fallback;
 }
 
-bool boolean(const QJsonObject &object, const QStringList &keys, bool fallback = false)
+bool booleanValue(const QJsonObject &object, const QStringList &keys, bool fallback = false)
 {
     for (const QString &key : keys) {
         const QJsonValue value = object.value(key);
@@ -90,10 +94,12 @@ bool finitePose(const MonitorPose &pose)
 }
 }
 
-FieldView::FieldView(QWidget *parent) : QWidget(parent)
+FieldView::FieldView(QWidget *parent) : QOpenGLWidget(parent)
 {
-    setMinimumSize(620, 620);
+    setMinimumSize(520, 420);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    setUpdateBehavior(QOpenGLWidget::PartialUpdate);
+    setCursor(Qt::OpenHandCursor);
 }
 
 void FieldView::setTelemetry(const MonitorTelemetry &telemetry)
@@ -111,170 +117,359 @@ void FieldView::clearTrails()
     update();
 }
 
-void FieldView::appendTrail(QVector<QPointF> &trail, const MonitorPose &pose)
+void FieldView::appendTrail(QVector<QVector3D> &trail, const MonitorPose &pose)
 {
     if (!pose.valid || !finitePose(pose))
         return;
-    const QPointF point(pose.xM, pose.yM);
-    if (trail.isEmpty() || QLineF(trail.last(), point).length() > 0.015)
+    const QVector3D point(pose.xM, pose.yM, pose.zM);
+    if (trail.isEmpty() || (trail.last() - point).length() > 0.015f)
         trail.append(point);
     while (trail.size() > 180)
         trail.removeFirst();
 }
 
-QPointF FieldView::fieldToCanvas(const QPointF &fieldPoint, const QRectF &fieldRect) const
+void FieldView::initializeGL()
 {
-    return QPointF(fieldRect.left() + fieldPoint.x() / kFieldWidthM * fieldRect.width(),
-                   fieldRect.bottom() - fieldPoint.y() / kFieldHeightM * fieldRect.height());
+    initializeOpenGLFunctions();
+    glClearColor(0.933f, 0.957f, 0.980f, 1.0f);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_LINE_SMOOTH);
+    glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
 }
 
-void FieldView::drawVehicle(QPainter &painter, const QRectF &fieldRect,
-                            const MonitorPose &pose, const QColor &color, bool isDrone)
+void FieldView::resizeGL(int viewportWidth, int viewportHeight)
+{
+    Q_UNUSED(viewportWidth)
+    Q_UNUSED(viewportHeight)
+    // QOpenGLWidget has already configured the device-pixel-aware viewport.
+}
+
+void FieldView::setupCamera()
+{
+    projection_.setToIdentity();
+    projection_.perspective(42.0f, static_cast<float>(width()) / qMax(1, height()),
+                            0.1f, 60.0f);
+
+    const double yaw = qDegreesToRadians(cameraYawDeg_);
+    const double pitch = qDegreesToRadians(cameraPitchDeg_);
+    const QVector3D target(2.0f, 2.5f, 0.35f);
+    const QVector3D eye(
+        target.x() + cameraDistance_ * std::cos(pitch) * std::cos(yaw),
+        target.y() + cameraDistance_ * std::cos(pitch) * std::sin(yaw),
+        target.z() + cameraDistance_ * std::sin(pitch));
+    view_.setToIdentity();
+    view_.lookAt(eye, target, QVector3D(0.0f, 0.0f, 1.0f));
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(projection_.constData());
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(view_.constData());
+}
+
+QPointF FieldView::projectToCanvas(const QVector3D &point) const
+{
+    const QVector4D clip = projection_ * view_ * QVector4D(point, 1.0f);
+    if (qFuzzyIsNull(clip.w()))
+        return QPointF(-1000, -1000);
+    const QVector3D ndc = clip.toVector3DAffine();
+    return QPointF((ndc.x() + 1.0) * 0.5 * width(),
+                   (1.0 - ndc.y()) * 0.5 * height());
+}
+
+void FieldView::resetCamera()
+{
+    cameraYawDeg_ = -50.0;
+    cameraPitchDeg_ = 38.0;
+    cameraDistance_ = 8.5;
+    update();
+}
+
+void FieldView::mousePressEvent(QMouseEvent *event)
+{
+    lastMousePosition_ = event->pos();
+    if (event->button() == Qt::LeftButton)
+        setCursor(Qt::ClosedHandCursor);
+}
+
+void FieldView::mouseMoveEvent(QMouseEvent *event)
+{
+    if (!(event->buttons() & Qt::LeftButton))
+        return;
+    const QPoint delta = event->pos() - lastMousePosition_;
+    lastMousePosition_ = event->pos();
+    cameraYawDeg_ += delta.x() * 0.45;
+    cameraPitchDeg_ = qBound(12.0, cameraPitchDeg_ + delta.y() * 0.35, 82.0);
+    update();
+}
+
+void FieldView::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton)
+        setCursor(Qt::OpenHandCursor);
+}
+
+void FieldView::mouseDoubleClickEvent(QMouseEvent *)
+{
+    resetCamera();
+}
+
+void FieldView::wheelEvent(QWheelEvent *event)
+{
+    const double steps = event->angleDelta().y() / 120.0;
+    cameraDistance_ = qBound(5.5, cameraDistance_ * std::pow(0.88, steps), 19.0);
+    update();
+    event->accept();
+}
+
+void FieldView::drawCircle(double x, double y, double z, double radius,
+                           int segments, bool filled)
+{
+    glBegin(filled ? GL_TRIANGLE_FAN : GL_LINE_LOOP);
+    if (filled)
+        glVertex3d(x, y, z);
+    for (int i = 0; i <= segments; ++i) {
+        const double angle = 2.0 * M_PI * i / segments;
+        glVertex3d(x + radius * std::cos(angle), y + radius * std::sin(angle), z);
+    }
+    glEnd();
+}
+
+void FieldView::drawBox(double halfX, double halfY, double boxHeight)
+{
+    const double z0 = 0.0;
+    const double z1 = boxHeight;
+    glBegin(GL_QUADS);
+    glVertex3d(-halfX, -halfY, z1); glVertex3d(halfX, -halfY, z1);
+    glVertex3d(halfX, halfY, z1); glVertex3d(-halfX, halfY, z1);
+    glVertex3d(-halfX, -halfY, z0); glVertex3d(-halfX, halfY, z0);
+    glVertex3d(halfX, halfY, z0); glVertex3d(halfX, -halfY, z0);
+    glVertex3d(-halfX, -halfY, z0); glVertex3d(halfX, -halfY, z0);
+    glVertex3d(halfX, -halfY, z1); glVertex3d(-halfX, -halfY, z1);
+    glVertex3d(halfX, -halfY, z0); glVertex3d(halfX, halfY, z0);
+    glVertex3d(halfX, halfY, z1); glVertex3d(halfX, -halfY, z1);
+    glVertex3d(halfX, halfY, z0); glVertex3d(-halfX, halfY, z0);
+    glVertex3d(-halfX, halfY, z1); glVertex3d(halfX, halfY, z1);
+    glVertex3d(-halfX, halfY, z0); glVertex3d(-halfX, -halfY, z0);
+    glVertex3d(-halfX, -halfY, z1); glVertex3d(-halfX, halfY, z1);
+    glEnd();
+}
+
+void FieldView::drawCar(const MonitorPose &pose)
 {
     if (!pose.valid || !finitePose(pose))
         return;
-
-    const QPointF center = fieldToCanvas(QPointF(pose.xM, pose.yM), fieldRect);
-    painter.save();
-    painter.translate(center);
-    painter.rotate(-pose.yawDeg);
-    painter.setPen(QPen(Qt::white, 2));
-    painter.setBrush(color);
-    if (isDrone) {
-        painter.drawEllipse(QPointF(-13, -13), 7, 7);
-        painter.drawEllipse(QPointF(13, -13), 7, 7);
-        painter.drawEllipse(QPointF(-13, 13), 7, 7);
-        painter.drawEllipse(QPointF(13, 13), 7, 7);
-        painter.setPen(QPen(color, 5, Qt::SolidLine, Qt::RoundCap));
-        painter.drawLine(QPointF(-12, -12), QPointF(12, 12));
-        painter.drawLine(QPointF(12, -12), QPointF(-12, 12));
-        painter.setPen(QPen(Qt::white, 2));
-        painter.setBrush(color.darker(115));
-        painter.drawRoundedRect(QRectF(-9, -8, 18, 16), 4, 4);
-    } else {
-        QPainterPath carPath;
-        carPath.moveTo(18, 0);
-        carPath.lineTo(7, -12);
-        carPath.lineTo(-16, -10);
-        carPath.lineTo(-16, 10);
-        carPath.lineTo(7, 12);
-        carPath.closeSubpath();
-        painter.drawPath(carPath);
-        painter.setBrush(Qt::white);
-        painter.drawEllipse(QPointF(7, 0), 3.5, 3.5);
-    }
-    painter.restore();
-
-    painter.setPen(QPen(QColor(16, 34, 56), 1));
-    painter.setBrush(QColor(255, 255, 255, 235));
-    const QString label = isDrone
-        ? QStringLiteral("无人机  %1 m").arg(pose.zM, 0, 'f', 2)
-        : QStringLiteral("小车  %1 m/s").arg(pose.speedMps, 0, 'f', 2);
-    const QRectF labelRect(center.x() + 20, center.y() - 34, 126, 26);
-    painter.drawRoundedRect(labelRect, 7, 7);
-    painter.drawText(labelRect, Qt::AlignCenter, label);
+    glPushMatrix();
+    glTranslated(pose.xM, pose.yM, 0.035);
+    glRotated(pose.yawDeg, 0, 0, 1);
+    glColor4f(0.14f, 0.52f, 0.90f, 1.0f);
+    drawBox(0.20, 0.14, 0.13);
+    glColor4f(0.92f, 0.97f, 1.0f, 1.0f);
+    glBegin(GL_TRIANGLES);
+    glVertex3d(0.23, 0.0, 0.145);
+    glVertex3d(0.10, -0.07, 0.145);
+    glVertex3d(0.10, 0.07, 0.145);
+    glEnd();
+    glPopMatrix();
 }
 
-void FieldView::paintEvent(QPaintEvent *)
+void FieldView::drawDrone(const MonitorPose &pose)
 {
-    QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.fillRect(rect(), QColor(QStringLiteral("#eef3f9")));
+    if (!pose.valid || !finitePose(pose))
+        return;
+    const double altitude = qMax(0.05, pose.zM);
+    glColor4f(0.12f, 0.20f, 0.30f, 0.16f);
+    drawCircle(pose.xM, pose.yM, 0.018, 0.23, 28, true);
+    glColor4f(0.93f, 0.61f, 0.19f, 0.62f);
+    glLineWidth(1.5f);
+    glBegin(GL_LINES);
+    glVertex3d(pose.xM, pose.yM, 0.03);
+    glVertex3d(pose.xM, pose.yM, altitude);
+    glEnd();
 
-    const double availableW = width() - 84.0;
-    const double availableH = height() - 84.0;
-    const double scale = qMin(availableW / kFieldWidthM, availableH / kFieldHeightM);
-    const QSizeF fieldSize(kFieldWidthM * scale, kFieldHeightM * scale);
-    QRectF fieldRect(QPointF((width() - fieldSize.width()) / 2.0,
-                             (height() - fieldSize.height()) / 2.0), fieldSize);
+    glPushMatrix();
+    glTranslated(pose.xM, pose.yM, altitude);
+    glRotated(pose.yawDeg, 0, 0, 1);
+    glLineWidth(5.0f);
+    glColor4f(0.93f, 0.61f, 0.19f, 1.0f);
+    glBegin(GL_LINES);
+    glVertex3d(-0.22, -0.22, 0.02); glVertex3d(0.22, 0.22, 0.02);
+    glVertex3d(0.22, -0.22, 0.02); glVertex3d(-0.22, 0.22, 0.02);
+    glEnd();
+    for (int sx : {-1, 1}) {
+        for (int sy : {-1, 1}) {
+            glColor4f(0.98f, 0.70f, 0.31f, 0.48f);
+            drawCircle(0.22 * sx, 0.22 * sy, 0.035, 0.115, 24, true);
+            glColor4f(0.75f, 0.43f, 0.10f, 1.0f);
+            drawCircle(0.22 * sx, 0.22 * sy, 0.04, 0.115, 24, false);
+        }
+    }
+    glColor4f(0.78f, 0.40f, 0.08f, 1.0f);
+    drawBox(0.115, 0.09, 0.12);
+    glPopMatrix();
+}
 
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(18, 40, 68, 22));
-    painter.drawRoundedRect(fieldRect.translated(7, 9), 14, 14);
-    painter.setBrush(QColor(QStringLiteral("#fbfcfe")));
-    painter.setPen(QPen(QColor(QStringLiteral("#b9c7d8")), 1.5));
-    painter.drawRoundedRect(fieldRect, 12, 12);
+void FieldView::drawFloor()
+{
+    glColor4f(0.985f, 0.992f, 1.0f, 1.0f);
+    glBegin(GL_QUADS);
+    glVertex3d(0, 0, 0); glVertex3d(4, 0, 0);
+    glVertex3d(4, 5, 0); glVertex3d(0, 5, 0);
+    glEnd();
 
-    painter.save();
-    painter.setClipRect(fieldRect);
-    painter.setPen(QPen(QColor(QStringLiteral("#e8edf4")), 1));
+    glLineWidth(1.0f);
+    glColor4f(0.82f, 0.87f, 0.92f, 1.0f);
+    glBegin(GL_LINES);
     for (int x = 0; x <= 8; ++x) {
-        const QPointF p1 = fieldToCanvas(QPointF(x * 0.5, 0), fieldRect);
-        const QPointF p2 = fieldToCanvas(QPointF(x * 0.5, 5), fieldRect);
-        painter.drawLine(p1, p2);
+        glVertex3d(x * 0.5, 0, 0.006);
+        glVertex3d(x * 0.5, 5, 0.006);
     }
     for (int y = 0; y <= 10; ++y) {
-        const QPointF p1 = fieldToCanvas(QPointF(0, y * 0.5), fieldRect);
-        const QPointF p2 = fieldToCanvas(QPointF(4, y * 0.5), fieldRect);
-        painter.drawLine(p1, p2);
+        glVertex3d(0, y * 0.5, 0.006);
+        glVertex3d(4, y * 0.5, 0.006);
     }
-    painter.restore();
+    glEnd();
 
-    auto drawTrail = [&](const QVector<QPointF> &trail, const QColor &color) {
+    glLineWidth(2.0f);
+    glColor4f(0.52f, 0.62f, 0.73f, 1.0f);
+    glBegin(GL_LINE_LOOP);
+    glVertex3d(0, 0, 0.012); glVertex3d(4, 0, 0.012);
+    glVertex3d(4, 5, 0.012); glVertex3d(0, 5, 0.012);
+    glEnd();
+}
+
+void FieldView::drawTrack()
+{
+    glLineWidth(5.0f);
+    glColor4f(0.18f, 0.28f, 0.38f, 1.0f);
+    glBegin(GL_LINE_STRIP);
+    glVertex3d(1.5, 2.0, 0.028);
+    glVertex3d(1.5, 3.5, 0.028);
+    for (int i = 1; i <= 40; ++i) {
+        const double theta = M_PI - M_PI * i / 40.0;
+        glVertex3d(2.25 + 0.75 * std::cos(theta),
+                   3.5 + 0.75 * std::sin(theta), 0.028);
+    }
+    glVertex3d(3.0, 2.0, 0.028);
+    for (int i = 1; i <= 40; ++i) {
+        const double theta = -M_PI * i / 40.0;
+        glVertex3d(2.25 + 0.75 * std::cos(theta),
+                   2.0 + 0.75 * std::sin(theta), 0.028);
+    }
+    glEnd();
+
+    const QVector<QVector3D> points = {
+        QVector3D(1.5f, 2.0f, 0.035f), QVector3D(1.5f, 3.5f, 0.035f),
+        QVector3D(3.0f, 3.5f, 0.035f), QVector3D(3.0f, 2.0f, 0.035f)
+    };
+    glColor4f(0.16f, 0.26f, 0.36f, 1.0f);
+    for (const QVector3D &point : points)
+        drawCircle(point.x(), point.y(), point.z(), 0.075, 24, true);
+
+    glLineWidth(3.0f);
+    glColor4f(0.08f, 0.61f, 0.43f, 1.0f);
+    drawCircle(0.75, 0.75, 0.03, 0.28, 40, false);
+    drawCircle(0.75, 0.75, 0.03, 0.18, 40, false);
+}
+
+void FieldView::drawTrails()
+{
+    auto drawTrail = [this](const QVector<QVector3D> &trail,
+                            float red, float green, float blue, bool airborne) {
         if (trail.size() < 2)
             return;
-        QPainterPath path(fieldToCanvas(trail.first(), fieldRect));
-        for (int i = 1; i < trail.size(); ++i)
-            path.lineTo(fieldToCanvas(trail.at(i), fieldRect));
-        QColor trailColor = color;
-        trailColor.setAlpha(110);
-        painter.setPen(QPen(trailColor, 2.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter.setBrush(Qt::NoBrush);
-        painter.drawPath(path);
+        glColor4f(red, green, blue, 0.72f);
+        glLineWidth(2.5f);
+        glBegin(GL_LINE_STRIP);
+        for (const QVector3D &point : trail)
+            glVertex3f(point.x(), point.y(), airborne ? qMax(0.04f, point.z()) : 0.045f);
+        glEnd();
     };
+    drawTrail(carTrail_, 0.14f, 0.52f, 0.90f, false);
+    drawTrail(droneTrail_, 0.93f, 0.61f, 0.19f, true);
+}
 
-    QPainterPath track;
-    track.moveTo(fieldToCanvas(QPointF(1.5, 2.0), fieldRect));
-    track.lineTo(fieldToCanvas(QPointF(1.5, 3.5), fieldRect));
-    for (int i = 1; i <= 30; ++i) {
-        const double theta = M_PI - M_PI * i / 30.0;
-        track.lineTo(fieldToCanvas(QPointF(2.25 + 0.75 * std::cos(theta),
-                                          3.5 + 0.75 * std::sin(theta)), fieldRect));
-    }
-    track.lineTo(fieldToCanvas(QPointF(3.0, 2.0), fieldRect));
-    for (int i = 1; i <= 30; ++i) {
-        const double theta = -M_PI * i / 30.0;
-        track.lineTo(fieldToCanvas(QPointF(2.25 + 0.75 * std::cos(theta),
-                                          2.0 + 0.75 * std::sin(theta)), fieldRect));
-    }
-    painter.setPen(QPen(QColor(QStringLiteral("#32485f")), 5.0, Qt::SolidLine,
-                        Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
-    painter.drawPath(track);
+void FieldView::drawAxes()
+{
+    glLineWidth(4.0f);
+    glBegin(GL_LINES);
+    glColor4f(0.88f, 0.26f, 0.26f, 1.0f);
+    glVertex3d(0, 0, 0.04); glVertex3d(0.9, 0, 0.04);
+    glColor4f(0.10f, 0.66f, 0.42f, 1.0f);
+    glVertex3d(0, 0, 0.04); glVertex3d(0, 1.0, 0.04);
+    glColor4f(0.20f, 0.48f, 0.84f, 1.0f);
+    glVertex3d(0, 0, 0.04); glVertex3d(0, 0, 1.0);
+    glEnd();
+}
 
-    const struct { const char *name; double x; double y; } points[] = {
-        {"A", 1.5, 2.0}, {"B", 1.5, 3.5}, {"C", 3.0, 3.5}, {"D", 3.0, 2.0}
+void FieldView::drawOverlay(QPainter &painter)
+{
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setFont(QFont(QStringLiteral("Microsoft YaHei"), 9));
+    painter.setPen(QColor(QStringLiteral("#718197")));
+    painter.drawText(QRectF(12, 8, width() - 24, 24), Qt::AlignRight,
+                     QStringLiteral("左键拖动旋转 · 滚轮缩放 · 双击复位视角"));
+
+    const struct { const char *name; QVector3D position; } pointLabels[] = {
+        {"A", QVector3D(1.5f, 2.0f, 0.11f)}, {"B", QVector3D(1.5f, 3.5f, 0.11f)},
+        {"C", QVector3D(3.0f, 3.5f, 0.11f)}, {"D", QVector3D(3.0f, 2.0f, 0.11f)},
+        {"H", QVector3D(0.75f, 0.75f, 0.08f)}, {"X", QVector3D(0.95f, 0, 0.06f)},
+        {"Y", QVector3D(0, 1.06f, 0.06f)}, {"Z", QVector3D(0, 0, 1.06f)}
     };
     painter.setFont(QFont(QStringLiteral("Microsoft YaHei"), 10, QFont::DemiBold));
-    for (const auto &point : points) {
-        const QPointF p = fieldToCanvas(QPointF(point.x, point.y), fieldRect);
-        painter.setPen(QPen(QColor(QStringLiteral("#ffffff")), 2));
-        painter.setBrush(QColor(QStringLiteral("#334a63")));
-        painter.drawEllipse(p, 9, 9);
-        painter.setPen(QColor(QStringLiteral("#334a63")));
-        painter.drawText(QRectF(p.x() - 15, p.y() - 31, 30, 20), Qt::AlignCenter,
-                         QString::fromLatin1(point.name));
+    for (const auto &item : pointLabels) {
+        const QPointF p = projectToCanvas(item.position);
+        painter.setPen(item.name[0] == 'H' ? QColor(QStringLiteral("#13835f"))
+                                           : QColor(QStringLiteral("#344b63")));
+        painter.drawText(QRectF(p.x() - 14, p.y() - 24, 28, 20), Qt::AlignCenter,
+                         QString::fromLatin1(item.name));
     }
 
-    const QPointF home = fieldToCanvas(QPointF(0.75, 0.75), fieldRect);
-    painter.setPen(QPen(QColor(QStringLiteral("#179c73")), 3));
-    painter.setBrush(QColor(23, 156, 115, 18));
-    painter.drawEllipse(home, 26, 26);
-    painter.drawEllipse(home, 17, 17);
-    painter.setPen(QColor(QStringLiteral("#137d5e")));
-    painter.drawText(QRectF(home.x() - 20, home.y() - 11, 40, 22), Qt::AlignCenter,
-                     QStringLiteral("H"));
+    auto drawChip = [&](const QPointF &anchor, const QString &text,
+                        const QColor &accent, bool placeRight) {
+        const double chipWidth = 122.0;
+        double x = placeRight ? anchor.x() + 18.0 : anchor.x() - chipWidth - 18.0;
+        double y = anchor.y() - 34.0;
+        x = qBound(5.0, x, width() - chipWidth - 5.0);
+        y = qBound(34.0, y, height() - 34.0);
+        const QRectF chip(x, y, chipWidth, 27.0);
+        painter.setBrush(QColor(255, 255, 255, 238));
+        painter.setPen(QPen(accent, 1.2));
+        painter.drawRoundedRect(chip, 7, 7);
+        painter.setPen(accent.darker(125));
+        painter.setFont(QFont(QStringLiteral("Microsoft YaHei"), 9, QFont::DemiBold));
+        painter.drawText(chip, Qt::AlignCenter, text);
+    };
 
-    drawTrail(carTrail_, QColor(QStringLiteral("#2385e5")));
-    drawTrail(droneTrail_, QColor(QStringLiteral("#ee9b31")));
-    drawVehicle(painter, fieldRect, telemetry_.car, QColor(QStringLiteral("#2385e5")), false);
-    drawVehicle(painter, fieldRect, telemetry_.drone, QColor(QStringLiteral("#ee9b31")), true);
+    if (telemetry_.car.valid) {
+        drawChip(projectToCanvas(QVector3D(telemetry_.car.xM, telemetry_.car.yM, 0.12f)),
+                 QStringLiteral("小车 %1 m/s").arg(telemetry_.car.speedMps, 0, 'f', 2),
+                 QColor(QStringLiteral("#2385e5")), false);
+    }
+    if (telemetry_.drone.valid) {
+        drawChip(projectToCanvas(QVector3D(telemetry_.drone.xM, telemetry_.drone.yM,
+                                           qMax(0.05, telemetry_.drone.zM) + 0.12)),
+                 QStringLiteral("无人机 %1 m").arg(telemetry_.drone.zM, 0, 'f', 2),
+                 QColor(QStringLiteral("#ee9b31")), true);
+    }
+}
 
-    painter.setFont(QFont(QStringLiteral("Microsoft YaHei"), 9));
-    painter.setPen(QColor(QStringLiteral("#7b8999")));
-    painter.drawText(QRectF(fieldRect.left(), fieldRect.bottom() + 14,
-                            fieldRect.width(), 24), Qt::AlignCenter,
-                     QStringLiteral("field 坐标系 · 左下角原点 · 单位 m · 4.00 × 5.00"));
+void FieldView::paintGL()
+{
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    setupCamera();
+    drawFloor();
+    drawTrack();
+    drawTrails();
+    drawCar(telemetry_.car);
+    drawDrone(telemetry_.drone);
+    drawAxes();
+    glFlush();
+
+    QPainter painter(this);
+    drawOverlay(painter);
 }
 
 GroundAirMonitor::GroundAirMonitor(QWidget *parent) : QMainWindow(parent)
@@ -380,7 +575,7 @@ void GroundAirMonitor::createUi()
     leftScroll->setWidgetResizable(true);
     leftScroll->setFrameShape(QFrame::NoFrame);
     leftScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    leftScroll->setFixedWidth(340);
+    leftScroll->setFixedWidth(310);
     leftScroll->setStyleSheet(QStringLiteral("QScrollArea{background:transparent;}"));
     QWidget *left = new QWidget();
     QVBoxLayout *leftLayout = new QVBoxLayout(left);
@@ -398,7 +593,7 @@ void GroundAirMonitor::createUi()
     fieldLayout->setContentsMargins(16, 15, 16, 13);
     QHBoxLayout *fieldHeader = new QHBoxLayout();
     fieldHeader->addWidget(sectionTitle(QStringLiteral("场地实时态势"),
-        QStringLiteral("激光雷达融合坐标 · 轨迹仅用于显示"), fieldCard));
+        QStringLiteral("激光雷达三维坐标 · 位置与轨迹仅用于显示"), fieldCard));
     fieldHeader->addStretch();
     QLabel *legend = new QLabel(QStringLiteral("<span style='color:#2385e5'>● 小车</span>　"
                                                 "<span style='color:#ee9b31'>● 无人机</span>"));
@@ -413,7 +608,7 @@ void GroundAirMonitor::createUi()
     rightScroll->setWidgetResizable(true);
     rightScroll->setFrameShape(QFrame::NoFrame);
     rightScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    rightScroll->setFixedWidth(354);
+    rightScroll->setFixedWidth(320);
     rightScroll->setStyleSheet(QStringLiteral("QScrollArea{background:transparent;}"));
     QWidget *right = new QWidget();
     QVBoxLayout *rightLayout = new QVBoxLayout(right);
@@ -678,7 +873,7 @@ bool GroundAirMonitor::decodeTelemetry(const QByteArray &payload,
         qRadiansToDegrees(number(car, {QStringLiteral("yaw_rad")})));
     value.car.speedMps = number(car, {QStringLiteral("speed_mps")});
     value.car.batteryPercent = number(car, {QStringLiteral("battery_percent")}, -1.0);
-    value.car.valid = boolean(car, {QStringLiteral("valid")}, true) && finitePose(value.car);
+    value.car.valid = booleanValue(car, {QStringLiteral("valid")}, true) && finitePose(value.car);
 
     value.drone.xM = number(drone, {QStringLiteral("x_m"), QStringLiteral("field_x_m")});
     value.drone.yM = number(drone, {QStringLiteral("y_m"), QStringLiteral("field_y_m")});
@@ -687,23 +882,23 @@ bool GroundAirMonitor::decodeTelemetry(const QByteArray &payload,
         qRadiansToDegrees(number(drone, {QStringLiteral("yaw_rad")})));
     value.drone.speedMps = number(drone, {QStringLiteral("speed_mps")});
     value.drone.batteryPercent = number(drone, {QStringLiteral("battery_percent")}, -1.0);
-    value.drone.valid = boolean(drone, {QStringLiteral("valid")}, true) && finitePose(value.drone);
+    value.drone.valid = booleanValue(drone, {QStringLiteral("valid")}, true) && finitePose(value.drone);
 
     value.missionId = textValue(mission, {QStringLiteral("mission_id")}, QStringLiteral("--"));
     value.missionMode = textValue(mission, {QStringLiteral("mode")}, QStringLiteral("DROP")).toUpper();
     value.missionState = textValue(mission, {QStringLiteral("state"), QStringLiteral("mission_state")},
                                    QStringLiteral("IDLE")).toUpper();
     value.elapsedS = number(mission, {QStringLiteral("elapsed_s")});
-    value.dropDone = boolean(mission, {QStringLiteral("drop_done")});
-    value.touchdownConfirmed = boolean(mission, {QStringLiteral("touchdown_confirmed")});
+    value.dropDone = booleanValue(mission, {QStringLiteral("drop_done")});
+    value.touchdownConfirmed = booleanValue(mission, {QStringLiteral("touchdown_confirmed")});
     value.flightMode = textValue(drone, {QStringLiteral("flight_mode")}, QStringLiteral("--"));
-    value.armed = boolean(drone, {QStringLiteral("armed")});
-    value.targetVisible = boolean(drone, {QStringLiteral("target_visible")});
+    value.armed = booleanValue(drone, {QStringLiteral("armed")});
+    value.targetVisible = booleanValue(drone, {QStringLiteral("target_visible")});
     value.targetConfidence = number(drone, {QStringLiteral("target_confidence")});
-    value.localizationOk = boolean(links, {QStringLiteral("localization_ok")},
+    value.localizationOk = booleanValue(links, {QStringLiteral("localization_ok")},
                                    value.car.valid && value.drone.valid);
-    value.carLinkOk = boolean(links, {QStringLiteral("car_link_ok")}, value.car.valid);
-    value.droneLinkOk = boolean(links, {QStringLiteral("drone_link_ok"), QStringLiteral("ground_link_ok")},
+    value.carLinkOk = booleanValue(links, {QStringLiteral("car_link_ok")}, value.car.valid);
+    value.droneLinkOk = booleanValue(links, {QStringLiteral("drone_link_ok"), QStringLiteral("ground_link_ok")},
                                   value.drone.valid);
     value.latencyMs = static_cast<int>(number(root, {QStringLiteral("latency_ms")}, -1));
     *result = value;

@@ -24,3 +24,7 @@ target_link_libraries(planescreen
   Qt${QT_VERSION_MAJOR}::Widgets
   Qt${QT_VERSION_MAJOR}::Network
 )
+
+if(MSVC)
+  target_compile_options(planescreen PRIVATE /utf-8)
+endif()

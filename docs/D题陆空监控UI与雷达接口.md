@@ -4,12 +4,14 @@
 
 本 UI 是只读监控端，负责：
 
-- 按 `field` 坐标系显示 400 cm × 500 cm 场地、H/A/B/C/D、固定轨迹；
+- 按 `field` 坐标系在 OpenGL 三维场景中显示 400 cm × 500 cm 场地、H/A/B/C/D、固定轨迹；
 - 以 10 Hz 左右刷新小车和无人机的位置、航向、轨迹和基础参数；
 - 用中文显示起飞、悬停、捕获小车、伴飞、抛投、动态下降、返航、降落等状态；
 - 显示定位有效性、车/机链路、视觉目标、数据龄和关键状态变化日志。
 
 它不发布小车启停、速度、转向或无人机控制命令，也不参与任何实时控制闭环。
+
+三维场景操作：按住鼠标左键拖动可旋转视角，滚轮缩放，双击恢复默认视角。无人机 `z_m` 直接决定模型高度、空中轨迹及地面投影线；小车固定显示在场地平面。
 
 ## 2. 坐标约定
 
@@ -124,6 +126,13 @@ python3 tools/fake_ground_air_server.py
 GROUND_AIR_MONITOR_WINDOWED=1 GROUND_AIR_MONITOR_DEMO=1 ./build/planescreen
 ```
 
+自动保存整窗验收截图后退出：
+
+```bash
+GROUND_AIR_MONITOR_WINDOWED=1 GROUND_AIR_MONITOR_DEMO=1 \
+GROUND_AIR_MONITOR_SCREENSHOT=/tmp/monitor.png ./build/planescreen
+```
+
 协议检查：
 
 ```bash
@@ -138,4 +147,4 @@ python3 tools/test_ground_air_protocol.py
 - 无人机高度来自雷达、飞控还是融合节点，避免重复坐标系；
 - 场外坐标、NaN、断链、乱序和进程重启时是否正确告警。
 
-当前提交只验证了接口和模拟数据，不代表真实激光雷达定位、ROS topic、Qt/Nano 实机运行已经通过。
+当前提交已在 Windows 的 Qt 5.15.2/MSVC Release 构建中验证三维界面和模拟数据；不代表真实激光雷达定位、ROS topic 或 Jetson/Nano 实机运行已经通过。

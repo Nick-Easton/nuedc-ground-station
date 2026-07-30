@@ -2,22 +2,25 @@
 #define GROUND_AIR_MONITOR_H
 
 #include <QJsonObject>
+#include <QMatrix4x4>
 #include <QMainWindow>
+#include <QOpenGLFunctions_1_1>
+#include <QOpenGLWidget>
 #include <QPointF>
 #include <QVector>
-#include <QWidget>
+#include <QVector3D>
 
 class QLabel;
 class QLineEdit;
 class QColor;
 class QPainter;
-class QPaintEvent;
-class QRectF;
+class QMouseEvent;
 class QPushButton;
 class QSpinBox;
 class QTcpSocket;
 class QTextEdit;
 class QTimer;
+class QWheelEvent;
 
 struct MonitorPose
 {
@@ -52,7 +55,7 @@ struct MonitorTelemetry
     int latencyMs = -1;
 };
 
-class FieldView : public QWidget
+class FieldView : public QOpenGLWidget, protected QOpenGLFunctions_1_1
 {
     Q_OBJECT
 public:
@@ -61,17 +64,40 @@ public:
     void clearTrails();
 
 protected:
-    void paintEvent(QPaintEvent *event) override;
+    void initializeGL() override;
+    void resizeGL(int width, int height) override;
+    void paintGL() override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
+    void wheelEvent(QWheelEvent *event) override;
 
 private:
-    QPointF fieldToCanvas(const QPointF &fieldPoint, const QRectF &fieldRect) const;
-    void appendTrail(QVector<QPointF> &trail, const MonitorPose &pose);
-    void drawVehicle(QPainter &painter, const QRectF &fieldRect, const MonitorPose &pose,
-                     const QColor &color, bool isDrone);
+    void appendTrail(QVector<QVector3D> &trail, const MonitorPose &pose);
+    void setupCamera();
+    void drawFloor();
+    void drawTrack();
+    void drawTrails();
+    void drawCar(const MonitorPose &pose);
+    void drawDrone(const MonitorPose &pose);
+    void drawAxes();
+    void drawCircle(double x, double y, double z, double radius, int segments,
+                    bool filled);
+    void drawBox(double halfX, double halfY, double height);
+    void drawOverlay(QPainter &painter);
+    QPointF projectToCanvas(const QVector3D &point) const;
+    void resetCamera();
 
     MonitorTelemetry telemetry_;
-    QVector<QPointF> carTrail_;
-    QVector<QPointF> droneTrail_;
+    QVector<QVector3D> carTrail_;
+    QVector<QVector3D> droneTrail_;
+    QMatrix4x4 projection_;
+    QMatrix4x4 view_;
+    QPoint lastMousePosition_;
+    double cameraYawDeg_ = -50.0;
+    double cameraPitchDeg_ = 38.0;
+    double cameraDistance_ = 8.5;
 };
 
 class GroundAirMonitor : public QMainWindow

@@ -45,7 +45,7 @@
 | `scripts/vision_start_on_command.py` | 收到 `START` 后启动相机、YOLO 和检测适配器；收到 `STOP` 或终止状态后释放摄像头。 |
 | `scripts/ground_air_telemetry_adapter.py` | 只读消费车/机雷达 Odometry、无人机和任务状态，输出统一监控 JSON；不发布控制命令。 |
 | `LandScreen-master/` | Qt 地图界面和本地假服务器。可执行文件名为 `planescreen`。 |
-| `LandScreen-master/groundAirMonitor.*` | D 题只读陆空监控窗口；4 m × 5 m 场地、双目标轨迹、中文状态和健康告警。 |
+| `LandScreen-master/groundAirMonitor.*` | D 题只读陆空监控窗口；OpenGL 三维 4 m × 5 m 场地、双目标轨迹、中文状态和健康告警。 |
 | `launch/` | ROS 1 启动文件。 |
 | `msg/` | ROS 1 自定义消息。修改后必须重新运行 `catkin_make`。 |
 | `systemd/`、`tools/install_onboard_user_service.sh` | NX 用户级一体化服务及安装脚本；用于登录后自动启动和异常重启。 |
