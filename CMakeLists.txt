@@ -32,6 +32,7 @@ catkin_install_python(PROGRAMS
   scripts/fc_state_bridge.py
   scripts/fake_yolo_node.py
   scripts/ground_path_planner.py
+  scripts/ground_air_telemetry_adapter.py
   scripts/grid_recognition_state_machine.py
   scripts/ground_station_gui.py
   scripts/landscreen_ros1_bridge.py

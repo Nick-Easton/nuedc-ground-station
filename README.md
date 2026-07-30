@@ -12,6 +12,28 @@ catkin_ws/
 
 比赛部署中，ROS Master、路径规划、视觉适配和 TCP 桥均运行在机载 NX；地面站 Nano 只运行 Qt UI，通过 TCP 8001 连接 NX，不需要加入 ROS Master。
 
+## D 题只读陆空监控 UI
+
+`LandScreen-master/planescreen` 当前默认启动 D 题监控台：显示 400 cm × 500 cm 场地、小车/无人机雷达位置与轨迹、无人机中文任务状态、定位和链路健康、数据龄及关键日志。该窗口只接收遥测，不包含小车或无人机运动控制入口。
+
+真实雷达接入时，在 NX 启动只读适配器和 TCP 桥：
+
+```bash
+roslaunch nuedc_ground_air ground_air_monitor.launch \
+  car_odometry_topic:=/lidar/car/odom \
+  drone_odometry_topic:=/lidar/drone/odom \
+  mission_mode:=DROP
+```
+
+雷达未接入时，可直接点击 UI 的“演示数据”，或运行 TCP 模拟源：
+
+```bash
+cd LandScreen-master
+python3 tools/fake_ground_air_server.py
+```
+
+完整坐标、topic、TCP JSON 和状态码约定见 [`docs/D题陆空监控UI与雷达接口.md`](docs/D题陆空监控UI与雷达接口.md)。
+
 ## 1. 复制到 Ubuntu ROS 1 工作空间
 
 将本仓库放置到以下位置：
