@@ -500,14 +500,15 @@ void GroundAirMonitor::createUi()
     setMinimumSize(1180, 720);
     setStyleSheet(QStringLiteral(R"(
         QMainWindow { background: #edf2f8; }
-        QWidget { font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #17283d; }
+        QWidget { font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+                  font-size: 13px; color: #17283d; }
         QFrame#card { background: #ffffff; border: 1px solid #d7e0ea; border-radius: 10px; }
         QPushButton { min-height: 32px; border: 0; border-radius: 4px; background: #e7e9ed;
-                      color: #536071; padding: 0 14px; font-weight: 600; }
+                      color: #536071; padding: 0 14px; font-size: 12px; font-weight: 600; }
         QPushButton:hover { background: #dce7f3; }
-        QCheckBox { color: #5f6c7d; font-size: 12px; spacing: 7px; }
+        QCheckBox { color: #5f6c7d; font-size: 13px; spacing: 7px; }
         QTextEdit { background: transparent; color: #526174; border: 0;
-                    padding: 3px; font-family: Consolas, "Microsoft YaHei"; font-size: 11px; }
+                    padding: 3px; font-family: Consolas, "Microsoft YaHei"; font-size: 12px; }
     )"));
 
     QWidget *central = new QWidget(this);
@@ -519,7 +520,7 @@ void GroundAirMonitor::createUi()
     QHBoxLayout *header = new QHBoxLayout();
     QVBoxLayout *titleBox = new QVBoxLayout();
     QLabel *title = new QLabel(QStringLiteral("陆空协同监控台"));
-    title->setStyleSheet(QStringLiteral("font-size:25px;font-weight:800;color:#142336;"));
+    title->setStyleSheet(QStringLiteral("font-size:24px;font-weight:800;color:#142336;"));
     QLabel *subtitle = new QLabel(QStringLiteral("大学生电子设计竞赛"));
     subtitle->setStyleSheet(QStringLiteral("font-size:13px;color:#7a8797;"));
     titleBox->addWidget(title);
@@ -557,6 +558,7 @@ void GroundAirMonitor::createUi()
     axesCheck->setChecked(true);
     QPushButton *resetButton = new QPushButton(QStringLiteral("复位视角"), fieldCard);
     resetButton->setFixedWidth(102);
+    resetButton->setStyleSheet(QStringLiteral("font-size:12px;font-weight:600;"));
     fieldHeader->addWidget(axesCheck);
     fieldHeader->addWidget(resetButton);
     fieldLayout->addLayout(fieldHeader);
@@ -570,9 +572,9 @@ void GroundAirMonitor::createUi()
                                                 "<span style='color:#df4545'>X 红</span>　"
                                                 "<span style='color:#19a56f'>Y 绿</span>　"
                                                 "<span style='color:#397fd1'>Z 蓝</span>"));
-    legend->setStyleSheet(QStringLiteral("font-size:12px;background:#ffffff;padding:6px 9px;border:1px solid #dce4ed;border-radius:5px;"));
+    legend->setStyleSheet(QStringLiteral("font-size:13px;background:#ffffff;padding:6px 9px;border:1px solid #dce4ed;border-radius:5px;"));
     QLabel *hint = new QLabel(QStringLiteral("左键旋转 · 滚轮缩放 · 双击复位"));
-    hint->setStyleSheet(QStringLiteral("font-size:11px;color:#7b8795;"));
+    hint->setStyleSheet(QStringLiteral("font-size:12px;color:#6f7d8e;"));
     legendRow->addWidget(legend);
     legendRow->addStretch();
     legendRow->addWidget(hint);
@@ -594,14 +596,14 @@ QWidget *GroundAirMonitor::createRealtimeCard()
     auto addSection = [&](const QString &name, const QString &color,
                           const QStringList &rows, QVector<QLabel *> *outputs) {
         QLabel *heading = new QLabel(name, frame);
-        heading->setStyleSheet(QStringLiteral("font-size:15px;font-weight:800;color:%1;margin-top:2px;").arg(color));
+        heading->setStyleSheet(QStringLiteral("font-size:16px;font-weight:800;color:%1;margin-top:2px;").arg(color));
         layout->addWidget(heading);
         QGridLayout *grid = new QGridLayout();
         grid->setHorizontalSpacing(12);
         grid->setVerticalSpacing(8);
         for (int row = 0; row < rows.size(); ++row) {
             QLabel *key = new QLabel(rows.at(row), frame);
-            key->setStyleSheet(QStringLiteral("font-size:12px;color:#748397;"));
+            key->setStyleSheet(QStringLiteral("font-size:13px;color:#748397;"));
             QLabel *value = makeValueLabel();
             grid->addWidget(key, row, 0);
             grid->addWidget(value, row, 1);
@@ -640,7 +642,9 @@ QWidget *GroundAirMonitor::createLogCard()
     QLabel *title = new QLabel(QStringLiteral("关键日志"), frame);
     title->setStyleSheet(QStringLiteral("font-size:15px;font-weight:800;"));
     QPushButton *clearButton = new QPushButton(QStringLiteral("清空"), frame);
-    clearButton->setFixedSize(64, 27);
+    clearButton->setFixedSize(68, 28);
+    clearButton->setStyleSheet(QStringLiteral(
+        "min-height:28px;max-height:28px;padding:0 10px;font-size:12px;font-weight:600;"));
     header->addWidget(title);
     header->addStretch();
     header->addWidget(clearButton);
