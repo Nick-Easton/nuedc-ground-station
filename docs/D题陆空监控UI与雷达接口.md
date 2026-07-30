@@ -7,7 +7,7 @@
 - 按 `field` 坐标系在 OpenGL 三维场景中显示 400 cm × 500 cm 场地、H/A/B/C/D、固定轨迹；
 - 以 10 Hz 左右刷新小车和无人机的位置、航向、轨迹和基础参数；
 - 用中文显示起飞、悬停、捕获小车、伴飞、抛投、动态下降、返航、降落等状态；
-- 显示定位有效性、车/机链路、视觉目标、数据龄和关键状态变化日志。
+- 左侧集中显示无人机/小车实时参数、无人机中文状态和关键状态变化日志。
 
 它不发布小车启停、速度、转向或无人机控制命令，也不参与任何实时控制闭环。
 
@@ -36,6 +36,13 @@ ground_air_telemetry_adapter.py（只读归一化）
 landscreen_ros1_bridge.py
   -> TCP 8001，每行一个 JSON
 Qt planescreen 监控 UI
+```
+
+连接设置不在比赛 UI 中显示。程序默认在后台连接 `127.0.0.1:8001`；部署到固定 NX 地址时，通过启动环境配置：
+
+```bash
+GROUND_AIR_MONITOR_HOST=192.168.1.20 \
+GROUND_AIR_MONITOR_PORT=8001 ./build/planescreen
 ```
 
 实际 topic 名可以通过 launch 参数替换，不要在源码中写死现场命名：
@@ -118,7 +125,7 @@ cd LandScreen-master
 python3 tools/fake_ground_air_server.py
 ```
 
-另一个终端启动 `build/planescreen`，连接 `127.0.0.1:8001`。也可以直接点击 UI 中的“演示数据”，该模式完全在 Qt 进程内生成数据。
+另一个终端启动 `build/planescreen`，程序会在后台自动连接 `127.0.0.1:8001`。界面不提供地址、端口或手动连接控件。
 
 截图或窗口化调试时可用：
 

@@ -2,27 +2,19 @@
 
 #include <QApplication>
 #include <QAbstractSocket>
+#include <QCheckBox>
 #include <QDateTime>
-#include <QFormLayout>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
-#include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonValue>
 #include <QLabel>
-#include <QLineF>
-#include <QLineEdit>
 #include <QMap>
 #include <QMouseEvent>
 #include <QPainter>
-#include <QPainterPath>
 #include <QPen>
-#include <QPolygonF>
 #include <QPushButton>
-#include <QScrollArea>
-#include <QSettings>
-#include <QSpinBox>
 #include <QTcpSocket>
 #include <QTextEdit>
 #include <QTimer>
@@ -34,9 +26,6 @@
 #include <cmath>
 
 namespace {
-constexpr double kFieldWidthM = 4.0;
-constexpr double kFieldHeightM = 5.0;
-
 QFrame *card(QWidget *parent = nullptr)
 {
     QFrame *frame = new QFrame(parent);
@@ -114,6 +103,17 @@ void FieldView::clearTrails()
 {
     carTrail_.clear();
     droneTrail_.clear();
+    update();
+}
+
+void FieldView::resetView()
+{
+    resetCamera();
+}
+
+void FieldView::setAxesVisible(bool visible)
+{
+    axesVisible_ = visible;
     update();
 }
 
@@ -407,11 +407,6 @@ void FieldView::drawAxes()
 void FieldView::drawOverlay(QPainter &painter)
 {
     painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setFont(QFont(QStringLiteral("Microsoft YaHei"), 9));
-    painter.setPen(QColor(QStringLiteral("#718197")));
-    painter.drawText(QRectF(12, 8, width() - 24, 24), Qt::AlignRight,
-                     QStringLiteral("左键拖动旋转 · 滚轮缩放 · 双击复位视角"));
-
     const struct { const char *name; QVector3D position; } pointLabels[] = {
         {"A", QVector3D(1.5f, 2.0f, 0.11f)}, {"B", QVector3D(1.5f, 3.5f, 0.11f)},
         {"C", QVector3D(3.0f, 3.5f, 0.11f)}, {"D", QVector3D(3.0f, 2.0f, 0.11f)},
@@ -426,34 +421,6 @@ void FieldView::drawOverlay(QPainter &painter)
         painter.drawText(QRectF(p.x() - 14, p.y() - 24, 28, 20), Qt::AlignCenter,
                          QString::fromLatin1(item.name));
     }
-
-    auto drawChip = [&](const QPointF &anchor, const QString &text,
-                        const QColor &accent, bool placeRight) {
-        const double chipWidth = 122.0;
-        double x = placeRight ? anchor.x() + 18.0 : anchor.x() - chipWidth - 18.0;
-        double y = anchor.y() - 34.0;
-        x = qBound(5.0, x, width() - chipWidth - 5.0);
-        y = qBound(34.0, y, height() - 34.0);
-        const QRectF chip(x, y, chipWidth, 27.0);
-        painter.setBrush(QColor(255, 255, 255, 238));
-        painter.setPen(QPen(accent, 1.2));
-        painter.drawRoundedRect(chip, 7, 7);
-        painter.setPen(accent.darker(125));
-        painter.setFont(QFont(QStringLiteral("Microsoft YaHei"), 9, QFont::DemiBold));
-        painter.drawText(chip, Qt::AlignCenter, text);
-    };
-
-    if (telemetry_.car.valid) {
-        drawChip(projectToCanvas(QVector3D(telemetry_.car.xM, telemetry_.car.yM, 0.12f)),
-                 QStringLiteral("小车 %1 m/s").arg(telemetry_.car.speedMps, 0, 'f', 2),
-                 QColor(QStringLiteral("#2385e5")), false);
-    }
-    if (telemetry_.drone.valid) {
-        drawChip(projectToCanvas(QVector3D(telemetry_.drone.xM, telemetry_.drone.yM,
-                                           qMax(0.05, telemetry_.drone.zM) + 0.12)),
-                 QStringLiteral("无人机 %1 m").arg(telemetry_.drone.zM, 0, 'f', 2),
-                 QColor(QStringLiteral("#ee9b31")), true);
-    }
 }
 
 void FieldView::paintGL()
@@ -465,7 +432,8 @@ void FieldView::paintGL()
     drawTrails();
     drawCar(telemetry_.car);
     drawDrone(telemetry_.drone);
-    drawAxes();
+    if (axesVisible_)
+        drawAxes();
     glFlush();
 
     QPainter painter(this);
@@ -479,28 +447,30 @@ GroundAirMonitor::GroundAirMonitor(QWidget *parent) : QMainWindow(parent)
     socket_ = new QTcpSocket(this);
     connect(socket_, &QTcpSocket::connected, this, [this]() {
         demoEnabled_ = false;
-        demoTimer_->stop();
-        demoButton_->setText(QStringLiteral("演示数据"));
-        setLinkState(QStringLiteral("实时数据已连接"), QStringLiteral("#168f6a"), true);
-        connectButton_->setText(QStringLiteral("断开"));
+        if (demoTimer_)
+            demoTimer_->stop();
+        setLinkState(QStringLiteral("监控中"), QStringLiteral("#168f6a"), true);
         appendLog(QStringLiteral("已连接数据服务器 %1:%2")
-                      .arg(serverEdit_->text()).arg(portEdit_->value()));
+                      .arg(fixedServerHost_).arg(fixedServerPort_));
     });
     connect(socket_, &QTcpSocket::disconnected, this, [this]() {
-        connectButton_->setText(QStringLiteral("连接"));
-        setLinkState(QStringLiteral("等待数据连接"), QStringLiteral("#8a98aa"), false);
-        appendLog(QStringLiteral("数据连接已断开"), QStringLiteral("WARN"));
+        if (!demoEnabled_) {
+            setLinkState(QStringLiteral("等待数据"), QStringLiteral("#8a98aa"), false);
+            appendLog(QStringLiteral("数据连接已断开"), QStringLiteral("WARN"));
+        }
     });
     connect(socket_, &QTcpSocket::readyRead, this, &GroundAirMonitor::readSocketData);
 #if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
     connect(socket_, &QAbstractSocket::errorOccurred,
             this, [this](QAbstractSocket::SocketError) {
-        setLinkState(QStringLiteral("连接失败"), QStringLiteral("#d25353"), false);
+        if (!demoEnabled_)
+            setLinkState(QStringLiteral("等待数据"), QStringLiteral("#d25353"), false);
     });
 #else
     connect(socket_, QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::error),
             this, [this](QAbstractSocket::SocketError) {
-        setLinkState(QStringLiteral("连接失败"), QStringLiteral("#d25353"), false);
+        if (!demoEnabled_)
+            setLinkState(QStringLiteral("等待数据"), QStringLiteral("#d25353"), false);
     });
 #endif
 
@@ -513,171 +483,173 @@ GroundAirMonitor::GroundAirMonitor(QWidget *parent) : QMainWindow(parent)
     demoTimer_->setInterval(100);
     connect(demoTimer_, &QTimer::timeout, this, &GroundAirMonitor::updateDemo);
 
-    QSettings settings(QStringLiteral("NUEDC"), QStringLiteral("GroundAirMonitor"));
-    serverEdit_->setText(settings.value(QStringLiteral("server_ip"),
-        QStringLiteral("127.0.0.1")).toString());
-    portEdit_->setValue(settings.value(QStringLiteral("server_port"), 8001).toInt());
+    fixedServerHost_ = qEnvironmentVariable("GROUND_AIR_MONITOR_HOST", "127.0.0.1");
+    bool portOk = false;
+    const int configuredPort = qEnvironmentVariableIntValue("GROUND_AIR_MONITOR_PORT", &portOk);
+    if (portOk && configuredPort > 0 && configuredPort <= 65535)
+        fixedServerPort_ = static_cast<quint16>(configuredPort);
     appendLog(QStringLiteral("监控台已启动，当前为只读模式"));
-    appendLog(QStringLiteral("点击“演示数据”可在雷达接入前检查界面"));
+    if (!qEnvironmentVariableIsSet("GROUND_AIR_MONITOR_DEMO"))
+        QTimer::singleShot(0, this, &GroundAirMonitor::connectToServer);
 }
 
 void GroundAirMonitor::createUi()
 {
-    setWindowTitle(QStringLiteral("陆空协同实时监控台"));
-    resize(1600, 940);
-    setMinimumSize(1280, 760);
+    setWindowTitle(QStringLiteral("陆空协同监控台"));
+    resize(1440, 860);
+    setMinimumSize(1180, 720);
     setStyleSheet(QStringLiteral(R"(
         QMainWindow { background: #edf2f8; }
         QWidget { font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #17283d; }
-        QFrame#card { background: #ffffff; border: 1px solid #dfe7f0; border-radius: 13px; }
-        QLineEdit, QSpinBox { min-height: 34px; background: #f7f9fc; border: 1px solid #d8e1ec;
-                            border-radius: 7px; padding: 0 9px; font-size: 13px; }
-        QPushButton { min-height: 35px; border: 0; border-radius: 7px; background: #e8eef6;
-                      color: #25405f; padding: 0 14px; font-weight: 600; }
+        QFrame#card { background: #ffffff; border: 1px solid #d7e0ea; border-radius: 10px; }
+        QPushButton { min-height: 32px; border: 0; border-radius: 4px; background: #e7e9ed;
+                      color: #536071; padding: 0 14px; font-weight: 600; }
         QPushButton:hover { background: #dce7f3; }
-        QPushButton#primary { background: #1976d2; color: white; }
-        QPushButton#primary:hover { background: #1268ba; }
-        QTextEdit { background: #101d2d; color: #cbd8e8; border: 0; border-radius: 10px;
-                    padding: 8px; font-family: Consolas, "Microsoft YaHei"; font-size: 12px; }
+        QCheckBox { color: #5f6c7d; font-size: 12px; spacing: 7px; }
+        QTextEdit { background: transparent; color: #526174; border: 0;
+                    padding: 3px; font-family: Consolas, "Microsoft YaHei"; font-size: 11px; }
     )"));
 
     QWidget *central = new QWidget(this);
     setCentralWidget(central);
     QVBoxLayout *root = new QVBoxLayout(central);
-    root->setContentsMargins(22, 17, 22, 18);
-    root->setSpacing(14);
+    root->setContentsMargins(20, 16, 20, 16);
+    root->setSpacing(12);
 
     QHBoxLayout *header = new QHBoxLayout();
     QVBoxLayout *titleBox = new QVBoxLayout();
-    QLabel *title = new QLabel(QStringLiteral("陆空协同实时监控台"));
-    title->setStyleSheet(QStringLiteral("font-size:26px;font-weight:800;color:#102238;"));
-    QLabel *subtitle = new QLabel(QStringLiteral("2026 全国大学生电子设计竞赛 D 题 · 只读监控端"));
-    subtitle->setStyleSheet(QStringLiteral("font-size:13px;color:#7b899b;"));
+    QLabel *title = new QLabel(QStringLiteral("陆空协同监控台"));
+    title->setStyleSheet(QStringLiteral("font-size:25px;font-weight:800;color:#142336;"));
+    QLabel *subtitle = new QLabel(QStringLiteral("大学生电子设计竞赛"));
+    subtitle->setStyleSheet(QStringLiteral("font-size:13px;color:#7a8797;"));
     titleBox->addWidget(title);
     titleBox->addWidget(subtitle);
     header->addLayout(titleBox);
     header->addStretch();
 
-    clockLabel_ = new QLabel(QStringLiteral("--:--:--"));
-    clockLabel_->setStyleSheet(QStringLiteral("font-size:14px;color:#64758a;margin-right:10px;"));
-    linkBadge_ = new QLabel(QStringLiteral("●  等待数据连接"));
+    linkBadge_ = new QLabel(QStringLiteral("●  等待数据"));
     linkBadge_->setAlignment(Qt::AlignCenter);
-    linkBadge_->setMinimumWidth(154);
-    setLinkState(QStringLiteral("等待数据连接"), QStringLiteral("#8a98aa"), false);
-    header->addWidget(clockLabel_);
+    linkBadge_->setMinimumWidth(112);
+    setLinkState(QStringLiteral("等待数据"), QStringLiteral("#8a98aa"), false);
     header->addWidget(linkBadge_);
     root->addLayout(header);
 
     QHBoxLayout *body = new QHBoxLayout();
-    body->setSpacing(14);
+    body->setSpacing(12);
 
-    QScrollArea *leftScroll = new QScrollArea();
-    leftScroll->setWidgetResizable(true);
-    leftScroll->setFrameShape(QFrame::NoFrame);
-    leftScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    leftScroll->setFixedWidth(310);
-    leftScroll->setStyleSheet(QStringLiteral("QScrollArea{background:transparent;}"));
     QWidget *left = new QWidget();
+    left->setFixedWidth(350);
     QVBoxLayout *leftLayout = new QVBoxLayout(left);
     leftLayout->setContentsMargins(0, 0, 0, 0);
-    leftLayout->setSpacing(12);
-    leftLayout->addWidget(createConnectionCard());
-    leftLayout->addWidget(createVehicleCard(QStringLiteral("小车定位"), QStringLiteral("#2385e5"), false));
-    leftLayout->addWidget(createVehicleCard(QStringLiteral("无人机定位"), QStringLiteral("#ee9b31"), true));
-    leftLayout->addStretch();
-    leftScroll->setWidget(left);
-    body->addWidget(leftScroll);
+    leftLayout->setSpacing(10);
+    leftLayout->addWidget(createRealtimeCard(), 1);
+    leftLayout->addWidget(createLogCard());
+    body->addWidget(left);
 
     QFrame *fieldCard = card();
     QVBoxLayout *fieldLayout = new QVBoxLayout(fieldCard);
-    fieldLayout->setContentsMargins(16, 15, 16, 13);
+    fieldLayout->setContentsMargins(15, 14, 15, 12);
     QHBoxLayout *fieldHeader = new QHBoxLayout();
-    fieldHeader->addWidget(sectionTitle(QStringLiteral("场地实时态势"),
-        QStringLiteral("激光雷达三维坐标 · 位置与轨迹仅用于显示"), fieldCard));
+    fieldHeader->addWidget(sectionTitle(QStringLiteral("三维态势"),
+        QStringLiteral("场地 400cm × 500cm × 200cm"), fieldCard));
     fieldHeader->addStretch();
-    QLabel *legend = new QLabel(QStringLiteral("<span style='color:#2385e5'>● 小车</span>　"
-                                                "<span style='color:#ee9b31'>● 无人机</span>"));
-    legend->setStyleSheet(QStringLiteral("font-size:12px;background:#f4f7fb;padding:7px 10px;border-radius:7px;"));
-    fieldHeader->addWidget(legend);
+    QCheckBox *axesCheck = new QCheckBox(QStringLiteral("显示坐标轴"), fieldCard);
+    axesCheck->setChecked(true);
+    QPushButton *resetButton = new QPushButton(QStringLiteral("复位视角"), fieldCard);
+    resetButton->setFixedWidth(102);
+    fieldHeader->addWidget(axesCheck);
+    fieldHeader->addWidget(resetButton);
     fieldLayout->addLayout(fieldHeader);
     fieldView_ = new FieldView(fieldCard);
+    connect(axesCheck, &QCheckBox::toggled, fieldView_, &FieldView::setAxesVisible);
+    connect(resetButton, &QPushButton::clicked, fieldView_, &FieldView::resetView);
     fieldLayout->addWidget(fieldView_, 1);
+    QHBoxLayout *legendRow = new QHBoxLayout();
+    QLabel *legend = new QLabel(QStringLiteral("<span style='color:#d78a18'>● 无人机</span>　"
+                                                "<span style='color:#1976d2'>● 小车</span>　"
+                                                "<span style='color:#df4545'>X 红</span>　"
+                                                "<span style='color:#19a56f'>Y 绿</span>　"
+                                                "<span style='color:#397fd1'>Z 蓝</span>"));
+    legend->setStyleSheet(QStringLiteral("font-size:12px;background:#ffffff;padding:6px 9px;border:1px solid #dce4ed;border-radius:5px;"));
+    QLabel *hint = new QLabel(QStringLiteral("左键旋转 · 滚轮缩放 · 双击复位"));
+    hint->setStyleSheet(QStringLiteral("font-size:11px;color:#7b8795;"));
+    legendRow->addWidget(legend);
+    legendRow->addStretch();
+    legendRow->addWidget(hint);
+    fieldLayout->addLayout(legendRow);
     body->addWidget(fieldCard, 1);
-
-    QScrollArea *rightScroll = new QScrollArea();
-    rightScroll->setWidgetResizable(true);
-    rightScroll->setFrameShape(QFrame::NoFrame);
-    rightScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    rightScroll->setFixedWidth(320);
-    rightScroll->setStyleSheet(QStringLiteral("QScrollArea{background:transparent;}"));
-    QWidget *right = new QWidget();
-    QVBoxLayout *rightLayout = new QVBoxLayout(right);
-    rightLayout->setContentsMargins(0, 0, 0, 0);
-    rightLayout->setSpacing(12);
-    rightLayout->addWidget(createMissionCard());
-    rightLayout->addWidget(createHealthCard());
-    rightLayout->addStretch();
-    rightScroll->setWidget(right);
-    body->addWidget(rightScroll);
     root->addLayout(body, 1);
-
-    QHBoxLayout *logHeader = new QHBoxLayout();
-    QLabel *logTitle = new QLabel(QStringLiteral("关键日志"));
-    logTitle->setStyleSheet(QStringLiteral("font-size:14px;font-weight:700;"));
-    QPushButton *clearButton = new QPushButton(QStringLiteral("清空"));
-    clearButton->setFixedWidth(70);
-    clearButton->setFixedHeight(28);
-    connect(clearButton, &QPushButton::clicked, this, [this]() { logView_->clear(); });
-    logHeader->addWidget(logTitle);
-    logHeader->addStretch();
-    logHeader->addWidget(clearButton);
-    root->addLayout(logHeader);
-    logView_ = new QTextEdit();
-    logView_->setReadOnly(true);
-    logView_->setFixedHeight(112);
-    root->addWidget(logView_);
 }
 
-QWidget *GroundAirMonitor::createConnectionCard()
+QWidget *GroundAirMonitor::createRealtimeCard()
 {
     QFrame *frame = card();
     QVBoxLayout *layout = new QVBoxLayout(frame);
-    layout->setContentsMargins(16, 15, 16, 16);
-    layout->setSpacing(10);
-    layout->addWidget(sectionTitle(QStringLiteral("数据连接"),
-        QStringLiteral("只接收，不发送运动控制命令"), frame));
+    layout->setContentsMargins(15, 14, 15, 15);
+    layout->setSpacing(8);
+    QLabel *title = new QLabel(QStringLiteral("实时参数"), frame);
+    title->setStyleSheet(QStringLiteral("font-size:18px;font-weight:800;color:#16283d;"));
+    layout->addWidget(title);
 
-    QHBoxLayout *endpoint = new QHBoxLayout();
-    serverEdit_ = new QLineEdit();
-    serverEdit_->setPlaceholderText(QStringLiteral("NX / 雷达桥 IP"));
-    portEdit_ = new QSpinBox();
-    portEdit_->setRange(1, 65535);
-    portEdit_->setFixedWidth(86);
-    endpoint->addWidget(serverEdit_, 1);
-    endpoint->addWidget(portEdit_);
-    layout->addLayout(endpoint);
+    auto addSection = [&](const QString &name, const QString &color,
+                          const QStringList &rows, QVector<QLabel *> *outputs) {
+        QLabel *heading = new QLabel(name, frame);
+        heading->setStyleSheet(QStringLiteral("font-size:15px;font-weight:800;color:%1;margin-top:2px;").arg(color));
+        layout->addWidget(heading);
+        QGridLayout *grid = new QGridLayout();
+        grid->setHorizontalSpacing(12);
+        grid->setVerticalSpacing(8);
+        for (int row = 0; row < rows.size(); ++row) {
+            QLabel *key = new QLabel(rows.at(row), frame);
+            key->setStyleSheet(QStringLiteral("font-size:12px;color:#748397;"));
+            QLabel *value = makeValueLabel();
+            grid->addWidget(key, row, 0);
+            grid->addWidget(value, row, 1);
+            outputs->append(value);
+        }
+        layout->addLayout(grid);
+    };
 
-    QHBoxLayout *buttons = new QHBoxLayout();
-    connectButton_ = new QPushButton(QStringLiteral("连接"));
-    connectButton_->setObjectName(QStringLiteral("primary"));
-    demoButton_ = new QPushButton(QStringLiteral("演示数据"));
-    connect(connectButton_, &QPushButton::clicked, this, [this]() {
-        if (socket_ && socket_->state() != QAbstractSocket::UnconnectedState)
-            disconnectFromServer();
-        else
-            connectToServer();
-    });
-    connect(demoButton_, &QPushButton::clicked, this, &GroundAirMonitor::toggleDemo);
-    buttons->addWidget(connectButton_);
-    buttons->addWidget(demoButton_);
-    layout->addLayout(buttons);
+    QVector<QLabel *> droneValues;
+    addSection(QStringLiteral("无人机"), QStringLiteral("#c78319"),
+               {QStringLiteral("X"), QStringLiteral("Y"), QStringLiteral("Z"),
+                QStringLiteral("航向角"), QStringLiteral("状态")}, &droneValues);
+    droneX_ = droneValues[0]; droneY_ = droneValues[1]; droneZ_ = droneValues[2];
+    droneYaw_ = droneValues[3]; mainStateLabel_ = droneValues[4];
 
-    sourceLabel_ = new QLabel(QStringLiteral("数据源　--"));
-    packetAgeLabel_ = new QLabel(QStringLiteral("数据龄　--"));
-    sourceLabel_->setStyleSheet(QStringLiteral("font-size:12px;color:#65768a;"));
-    packetAgeLabel_->setStyleSheet(QStringLiteral("font-size:12px;color:#65768a;"));
-    layout->addWidget(sourceLabel_);
-    layout->addWidget(packetAgeLabel_);
+    QFrame *divider = new QFrame(frame);
+    divider->setFrameShape(QFrame::HLine);
+    divider->setStyleSheet(QStringLiteral("color:#dce3eb;"));
+    layout->addWidget(divider);
+
+    QVector<QLabel *> carValues;
+    addSection(QStringLiteral("小车"), QStringLiteral("#1976d2"),
+               {QStringLiteral("X"), QStringLiteral("Y"), QStringLiteral("航向角")}, &carValues);
+    carX_ = carValues[0]; carY_ = carValues[1]; carYaw_ = carValues[2];
+    layout->addStretch();
+    return frame;
+}
+
+QWidget *GroundAirMonitor::createLogCard()
+{
+    QFrame *frame = card();
+    QVBoxLayout *layout = new QVBoxLayout(frame);
+    layout->setContentsMargins(12, 9, 12, 9);
+    layout->setSpacing(4);
+    QHBoxLayout *header = new QHBoxLayout();
+    QLabel *title = new QLabel(QStringLiteral("关键日志"), frame);
+    title->setStyleSheet(QStringLiteral("font-size:15px;font-weight:800;"));
+    QPushButton *clearButton = new QPushButton(QStringLiteral("清空"), frame);
+    clearButton->setFixedSize(64, 27);
+    header->addWidget(title);
+    header->addStretch();
+    header->addWidget(clearButton);
+    layout->addLayout(header);
+    logView_ = new QTextEdit(frame);
+    logView_->setReadOnly(true);
+    logView_->setFixedHeight(76);
+    connect(clearButton, &QPushButton::clicked, this, [this]() { logView_->clear(); });
+    layout->addWidget(logView_);
     return frame;
 }
 
@@ -689,126 +661,14 @@ QLabel *GroundAirMonitor::makeValueLabel(const QString &placeholder)
     return label;
 }
 
-QWidget *GroundAirMonitor::createVehicleCard(const QString &title, const QString &accent, bool drone)
-{
-    QFrame *frame = card();
-    QVBoxLayout *layout = new QVBoxLayout(frame);
-    layout->setContentsMargins(16, 14, 16, 15);
-    QLabel *heading = new QLabel(QStringLiteral("●  %1").arg(title));
-    heading->setStyleSheet(QStringLiteral("font-size:16px;font-weight:700;color:%1;").arg(accent));
-    layout->addWidget(heading);
-
-    QGridLayout *values = new QGridLayout();
-    values->setVerticalSpacing(7);
-    const QStringList names = drone
-        ? QStringList{QStringLiteral("X"), QStringLiteral("Y"), QStringLiteral("高度"),
-                      QStringLiteral("航向"), QStringLiteral("电量"), QStringLiteral("飞行模式")}
-        : QStringList{QStringLiteral("X"), QStringLiteral("Y"), QStringLiteral("航向"),
-                      QStringLiteral("速度"), QStringLiteral("电量")};
-    QVector<QLabel *> labels;
-    for (int row = 0; row < names.size(); ++row) {
-        QLabel *name = new QLabel(names.at(row));
-        name->setStyleSheet(QStringLiteral("font-size:12px;color:#7f8da0;"));
-        QLabel *value = makeValueLabel();
-        values->addWidget(name, row, 0);
-        values->addWidget(value, row, 1);
-        labels.append(value);
-    }
-    layout->addLayout(values);
-    if (drone) {
-        droneX_ = labels[0]; droneY_ = labels[1]; droneZ_ = labels[2];
-        droneYaw_ = labels[3]; droneBattery_ = labels[4]; flightMode_ = labels[5];
-    } else {
-        carX_ = labels[0]; carY_ = labels[1]; carYaw_ = labels[2];
-        carSpeed_ = labels[3]; carBattery_ = labels[4];
-    }
-    return frame;
-}
-
-QWidget *GroundAirMonitor::createMissionCard()
-{
-    QFrame *frame = card();
-    QVBoxLayout *layout = new QVBoxLayout(frame);
-    layout->setContentsMargins(17, 16, 17, 17);
-    layout->setSpacing(9);
-    layout->addWidget(sectionTitle(QStringLiteral("无人机实时状态"),
-        QStringLiteral("任务状态机文字显示"), frame));
-
-    mainStateLabel_ = new QLabel(QStringLiteral("任务待机"));
-    mainStateLabel_->setAlignment(Qt::AlignCenter);
-    mainStateLabel_->setMinimumHeight(62);
-    mainStateLabel_->setStyleSheet(QStringLiteral(
-        "background:#eef5ff;color:#196fbd;border:1px solid #cfe2f7;border-radius:10px;"
-        "font-size:24px;font-weight:800;"));
-    missionMetaLabel_ = new QLabel(QStringLiteral("模式 --　｜　计时 00:00.0"));
-    missionMetaLabel_->setAlignment(Qt::AlignCenter);
-    missionMetaLabel_->setStyleSheet(QStringLiteral("font-size:12px;color:#728196;"));
-    layout->addWidget(mainStateLabel_);
-    layout->addWidget(missionMetaLabel_);
-
-    const QStringList stages = {
-        QStringLiteral("起飞"), QStringLiteral("稳定悬停"), QStringLiteral("捕获小车"),
-        QStringLiteral("伴飞"), QStringLiteral("抛投 / 动态降落"),
-        QStringLiteral("再起飞 / 返航"), QStringLiteral("降落完成")
-    };
-    for (const QString &stage : stages) {
-        QLabel *label = new QLabel(QStringLiteral("○　%1").arg(stage));
-        label->setMinimumHeight(28);
-        label->setStyleSheet(QStringLiteral("font-size:13px;color:#8a97a8;padding-left:4px;"));
-        stageLabels_.append(label);
-        layout->addWidget(label);
-    }
-    return frame;
-}
-
-QWidget *GroundAirMonitor::createHealthCard()
-{
-    QFrame *frame = card();
-    QVBoxLayout *layout = new QVBoxLayout(frame);
-    layout->setContentsMargins(17, 15, 17, 16);
-    layout->setSpacing(9);
-    layout->addWidget(sectionTitle(QStringLiteral("定位与链路"),
-        QStringLiteral("异常时仅告警，不介入控制"), frame));
-    localizationLabel_ = new QLabel();
-    carLinkLabel_ = new QLabel();
-    droneLinkLabel_ = new QLabel();
-    targetLabel_ = new QLabel();
-    const QList<QLabel *> labels = {localizationLabel_, carLinkLabel_, droneLinkLabel_, targetLabel_};
-    for (QLabel *label : labels) {
-        label->setMinimumHeight(30);
-        label->setStyleSheet(QStringLiteral("background:#f5f8fb;border-radius:7px;padding:0 9px;font-size:12px;"));
-        layout->addWidget(label);
-    }
-    localizationLabel_->setText(QStringLiteral("○　激光雷达定位　等待数据"));
-    carLinkLabel_->setText(QStringLiteral("○　小车数据链路　等待数据"));
-    droneLinkLabel_->setText(QStringLiteral("○　无人机数据链路　等待数据"));
-    targetLabel_->setText(QStringLiteral("○　视觉目标　等待数据"));
-    return frame;
-}
-
 void GroundAirMonitor::connectToServer()
 {
-    const QString host = serverEdit_->text().trimmed();
-    if (host.isEmpty()) {
-        appendLog(QStringLiteral("服务器地址不能为空"), QStringLiteral("ERROR"));
-        return;
-    }
     demoEnabled_ = false;
     if (demoTimer_)
         demoTimer_->stop();
-    demoButton_->setText(QStringLiteral("演示数据"));
-    QSettings settings(QStringLiteral("NUEDC"), QStringLiteral("GroundAirMonitor"));
-    settings.setValue(QStringLiteral("server_ip"), host);
-    settings.setValue(QStringLiteral("server_port"), portEdit_->value());
-    setLinkState(QStringLiteral("正在连接"), QStringLiteral("#d08a19"), false);
+    setLinkState(QStringLiteral("等待数据"), QStringLiteral("#d08a19"), false);
     socket_->abort();
-    socket_->connectToHost(host, static_cast<quint16>(portEdit_->value()));
-}
-
-void GroundAirMonitor::disconnectFromServer()
-{
-    socket_->abort();
-    socketBuffer_.clear();
+    socket_->connectToHost(fixedServerHost_, fixedServerPort_);
 }
 
 void GroundAirMonitor::readSocketData()
@@ -917,39 +777,13 @@ void GroundAirMonitor::applyTelemetry(const MonitorTelemetry &telemetry, bool fr
     carX_->setText(positionText(telemetry_.car.valid, telemetry_.car.xM));
     carY_->setText(positionText(telemetry_.car.valid, telemetry_.car.yM));
     carYaw_->setText(telemetry_.car.valid ? QStringLiteral("%1°").arg(telemetry_.car.yawDeg, 0, 'f', 1) : QStringLiteral("--"));
-    carSpeed_->setText(telemetry_.car.valid ? QStringLiteral("%1 m/s").arg(telemetry_.car.speedMps, 0, 'f', 2) : QStringLiteral("--"));
-    carBattery_->setText(formattedBattery(telemetry_.car.batteryPercent));
     droneX_->setText(positionText(telemetry_.drone.valid, telemetry_.drone.xM));
     droneY_->setText(positionText(telemetry_.drone.valid, telemetry_.drone.yM));
     droneZ_->setText(positionText(telemetry_.drone.valid, telemetry_.drone.zM));
     droneYaw_->setText(telemetry_.drone.valid ? QStringLiteral("%1°").arg(telemetry_.drone.yawDeg, 0, 'f', 1) : QStringLiteral("--"));
-    droneBattery_->setText(formattedBattery(telemetry_.drone.batteryPercent));
-    flightMode_->setText(telemetry_.flightMode);
-    sourceLabel_->setText(QStringLiteral("数据源　%1%2")
-        .arg(telemetry_.source, fromDemo ? QStringLiteral("（演示）") : QString()));
     updateStatusText();
-    updateStageList();
-
-    auto healthText = [](bool ok, const QString &name) {
-        return QStringLiteral("%1　%2　%3").arg(ok ? QStringLiteral("●") : QStringLiteral("●"),
-            name, ok ? QStringLiteral("正常") : QStringLiteral("异常 / 未就绪"));
-    };
-    auto healthStyle = [](bool ok) {
-        return QStringLiteral("background:%1;color:%2;border-radius:7px;padding:0 9px;font-size:12px;")
-            .arg(ok ? QStringLiteral("#edf9f4") : QStringLiteral("#fff1f1"),
-                 ok ? QStringLiteral("#16825f") : QStringLiteral("#c14f4f"));
-    };
-    localizationLabel_->setText(healthText(telemetry_.localizationOk, QStringLiteral("激光雷达定位")));
-    localizationLabel_->setStyleSheet(healthStyle(telemetry_.localizationOk));
-    carLinkLabel_->setText(healthText(telemetry_.carLinkOk, QStringLiteral("小车数据链路")));
-    carLinkLabel_->setStyleSheet(healthStyle(telemetry_.carLinkOk));
-    droneLinkLabel_->setText(healthText(telemetry_.droneLinkOk, QStringLiteral("无人机数据链路")));
-    droneLinkLabel_->setStyleSheet(healthStyle(telemetry_.droneLinkOk));
-    targetLabel_->setText(QStringLiteral("%1　视觉目标　%2%3")
-        .arg(telemetry_.targetVisible ? QStringLiteral("●") : QStringLiteral("●"),
-             telemetry_.targetVisible ? QStringLiteral("已锁定　") : QStringLiteral("未锁定"),
-             telemetry_.targetVisible ? QStringLiteral("%1%").arg(telemetry_.targetConfidence * 100.0, 0, 'f', 0) : QString()));
-    targetLabel_->setStyleSheet(healthStyle(telemetry_.targetVisible));
+    setLinkState(fromDemo ? QStringLiteral("演示中") : QStringLiteral("监控中"),
+                 fromDemo ? QStringLiteral("#168f6a") : QStringLiteral("#168f6a"), true);
 
     if (lastState_ != telemetry_.missionState) {
         appendLog(QStringLiteral("无人机状态：%1 → %2")
@@ -968,53 +802,9 @@ void GroundAirMonitor::updateStatusText()
                        telemetry_.missionState.contains(QStringLiteral("ABORT"));
     const bool complete = telemetry_.missionState == QStringLiteral("COMPLETE") ||
                           telemetry_.missionState == QStringLiteral("LANDED");
-    const QString bg = error ? QStringLiteral("#fff0f0") : complete ? QStringLiteral("#ebf9f3") : QStringLiteral("#eef5ff");
-    const QString fg = error ? QStringLiteral("#c94848") : complete ? QStringLiteral("#148260") : QStringLiteral("#196fbd");
-    const QString border = error ? QStringLiteral("#f2caca") : complete ? QStringLiteral("#c4eadc") : QStringLiteral("#cfe2f7");
+    const QString fg = error ? QStringLiteral("#c94848") : complete ? QStringLiteral("#148260") : QStringLiteral("#b97917");
     mainStateLabel_->setStyleSheet(QStringLiteral(
-        "background:%1;color:%2;border:1px solid %3;border-radius:10px;font-size:24px;font-weight:800;")
-        .arg(bg, fg, border));
-    const int minutes = static_cast<int>(telemetry_.elapsedS) / 60;
-    const double seconds = telemetry_.elapsedS - minutes * 60;
-    const QString mode = telemetry_.missionMode == QStringLiteral("MOVING_LAND")
-        ? QStringLiteral("动态起降") : telemetry_.missionMode == QStringLiteral("DROP")
-        ? QStringLiteral("抛投任务") : telemetry_.missionMode;
-    missionMetaLabel_->setText(QStringLiteral("%1　｜　任务 %2　｜　计时 %3:%4")
-        .arg(mode, telemetry_.missionId)
-        .arg(minutes, 2, 10, QLatin1Char('0'))
-        .arg(seconds, 4, 'f', 1, QLatin1Char('0')));
-}
-
-void GroundAirMonitor::updateStageList()
-{
-    const QString state = telemetry_.missionState;
-    int active = -1;
-    if (state == QStringLiteral("TAKEOFF") || state == QStringLiteral("TAKEOFF_1P5M")) active = 0;
-    else if (state.contains(QStringLiteral("HOVER"))) active = 1;
-    else if (state.contains(QStringLiteral("ACQUIRE"))) active = 2;
-    else if (state.contains(QStringLiteral("FOLLOW"))) active = 3;
-    else if (state.contains(QStringLiteral("DROP")) || state.contains(QStringLiteral("DESCENT")) ||
-             state.contains(QStringLiteral("TOUCHDOWN")) || state.contains(QStringLiteral("HOLD"))) active = 4;
-    else if (state.contains(QStringLiteral("RE_TAKEOFF")) || state.contains(QStringLiteral("RETURN")) ||
-             state == QStringLiteral("RTL")) active = 5;
-    else if (state.contains(QStringLiteral("LAND")) || state.contains(QStringLiteral("COMPLETE"))) active = 6;
-
-    for (int i = 0; i < stageLabels_.size(); ++i) {
-        QLabel *label = stageLabels_.at(i);
-        QString base = label->text();
-        if (base.size() > 2)
-            base = base.mid(2);
-        if (i < active) {
-            label->setText(QStringLiteral("✓　%1").arg(base));
-            label->setStyleSheet(QStringLiteral("font-size:13px;color:#16825f;padding-left:4px;font-weight:600;"));
-        } else if (i == active) {
-            label->setText(QStringLiteral("●　%1").arg(base));
-            label->setStyleSheet(QStringLiteral("font-size:13px;color:#1976d2;background:#edf5fd;border-radius:7px;padding-left:8px;font-weight:700;"));
-        } else {
-            label->setText(QStringLiteral("○　%1").arg(base));
-            label->setStyleSheet(QStringLiteral("font-size:13px;color:#8a97a8;padding-left:4px;"));
-        }
-    }
+        "font-size:14px;font-weight:800;color:%1;").arg(fg));
 }
 
 void GroundAirMonitor::setLinkState(const QString &text, const QString &color, bool connected)
@@ -1032,19 +822,13 @@ void GroundAirMonitor::setLinkState(const QString &text, const QString &color, b
 void GroundAirMonitor::updateFreshness()
 {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    clockLabel_->setText(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd  HH:mm:ss")));
-    if (lastReceiveMs_ <= 0) {
-        packetAgeLabel_->setText(QStringLiteral("数据龄　--"));
+    if (lastReceiveMs_ <= 0)
         return;
-    }
     const qint64 age = now - lastReceiveMs_;
-    packetAgeLabel_->setText(QStringLiteral("数据龄　%1 ms").arg(age));
-    packetAgeLabel_->setStyleSheet(QStringLiteral("font-size:12px;color:%1;")
-        .arg(age > 1200 ? QStringLiteral("#c94d4d") : QStringLiteral("#16825f")));
     if (!demoEnabled_ && socket_->state() == QAbstractSocket::ConnectedState && age > 1200)
         setLinkState(QStringLiteral("数据超时"), QStringLiteral("#c94d4d"), false);
     else if (!demoEnabled_ && socket_->state() == QAbstractSocket::ConnectedState)
-        setLinkState(QStringLiteral("实时数据已连接"), QStringLiteral("#168f6a"), true);
+        setLinkState(QStringLiteral("监控中"), QStringLiteral("#168f6a"), true);
 }
 
 void GroundAirMonitor::toggleDemo()
@@ -1056,14 +840,13 @@ void GroundAirMonitor::toggleDemo()
         demoTimeS_ = 0.0;
         fieldView_->clearTrails();
         demoTimer_->start();
-        demoButton_->setText(QStringLiteral("停止演示"));
-        setLinkState(QStringLiteral("演示数据运行中"), QStringLiteral("#8b66cf"), true);
+        setLinkState(QStringLiteral("演示中"), QStringLiteral("#168f6a"), true);
         appendLog(QStringLiteral("已启用本地演示数据"));
     } else {
         demoTimer_->stop();
-        demoButton_->setText(QStringLiteral("演示数据"));
-        setLinkState(QStringLiteral("等待数据连接"), QStringLiteral("#8a98aa"), false);
+        setLinkState(QStringLiteral("等待数据"), QStringLiteral("#8a98aa"), false);
         appendLog(QStringLiteral("演示数据已停止"));
+        connectToServer();
     }
 }
 
@@ -1154,13 +937,6 @@ QString GroundAirMonitor::chineseState(const QString &state) const
         {QStringLiteral("FAILED"), QStringLiteral("任务失败")}
     };
     return names.value(state.toUpper(), state.isEmpty() ? QStringLiteral("状态未知") : state);
-}
-
-QString GroundAirMonitor::formattedBattery(double percent) const
-{
-    if (!std::isfinite(percent) || percent < 0.0)
-        return QStringLiteral("--");
-    return QStringLiteral("%1 %").arg(qBound(0.0, percent, 100.0), 0, 'f', 0);
 }
 
 void GroundAirMonitor::appendLog(const QString &message, const QString &level)

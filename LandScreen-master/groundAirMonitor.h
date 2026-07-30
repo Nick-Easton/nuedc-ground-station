@@ -11,12 +11,9 @@
 #include <QVector3D>
 
 class QLabel;
-class QLineEdit;
-class QColor;
 class QPainter;
 class QMouseEvent;
 class QPushButton;
-class QSpinBox;
 class QTcpSocket;
 class QTextEdit;
 class QTimer;
@@ -62,6 +59,8 @@ public:
     explicit FieldView(QWidget *parent = nullptr);
     void setTelemetry(const MonitorTelemetry &telemetry);
     void clearTrails();
+    void resetView();
+    void setAxesVisible(bool visible);
 
 protected:
     void initializeGL() override;
@@ -98,6 +97,7 @@ private:
     double cameraYawDeg_ = -50.0;
     double cameraPitchDeg_ = 38.0;
     double cameraDistance_ = 8.5;
+    bool axesVisible_ = true;
 };
 
 class GroundAirMonitor : public QMainWindow
@@ -108,7 +108,6 @@ public:
 
 private slots:
     void connectToServer();
-    void disconnectFromServer();
     void readSocketData();
     void updateFreshness();
     void toggleDemo();
@@ -116,19 +115,15 @@ private slots:
 
 private:
     void createUi();
-    QWidget *createConnectionCard();
-    QWidget *createVehicleCard(const QString &title, const QString &accent, bool drone);
-    QWidget *createMissionCard();
-    QWidget *createHealthCard();
+    QWidget *createRealtimeCard();
+    QWidget *createLogCard();
     QLabel *makeValueLabel(const QString &placeholder = QStringLiteral("--"));
     void applyTelemetry(const MonitorTelemetry &telemetry, bool fromDemo = false);
     bool decodeTelemetry(const QByteArray &payload, MonitorTelemetry *result, QString *error) const;
     void updateStatusText();
-    void updateStageList();
     void setLinkState(const QString &text, const QString &color, bool connected);
     void appendLog(const QString &message, const QString &level = QStringLiteral("INFO"));
     QString chineseState(const QString &state) const;
-    QString formattedBattery(double percent) const;
 
     QTcpSocket *socket_ = nullptr;
     QTimer *freshnessTimer_ = nullptr;
@@ -141,34 +136,19 @@ private:
     double demoTimeS_ = 0.0;
 
     FieldView *fieldView_ = nullptr;
-    QLineEdit *serverEdit_ = nullptr;
-    QSpinBox *portEdit_ = nullptr;
-    QPushButton *connectButton_ = nullptr;
-    QPushButton *demoButton_ = nullptr;
     QLabel *linkBadge_ = nullptr;
-    QLabel *clockLabel_ = nullptr;
-    QLabel *sourceLabel_ = nullptr;
-    QLabel *packetAgeLabel_ = nullptr;
     QLabel *mainStateLabel_ = nullptr;
-    QLabel *missionMetaLabel_ = nullptr;
-    QLabel *localizationLabel_ = nullptr;
-    QLabel *carLinkLabel_ = nullptr;
-    QLabel *droneLinkLabel_ = nullptr;
-    QLabel *targetLabel_ = nullptr;
     QTextEdit *logView_ = nullptr;
-    QVector<QLabel *> stageLabels_;
+    QString fixedServerHost_ = QStringLiteral("127.0.0.1");
+    quint16 fixedServerPort_ = 8001;
 
     QLabel *carX_ = nullptr;
     QLabel *carY_ = nullptr;
     QLabel *carYaw_ = nullptr;
-    QLabel *carSpeed_ = nullptr;
-    QLabel *carBattery_ = nullptr;
     QLabel *droneX_ = nullptr;
     QLabel *droneY_ = nullptr;
     QLabel *droneZ_ = nullptr;
     QLabel *droneYaw_ = nullptr;
-    QLabel *droneBattery_ = nullptr;
-    QLabel *flightMode_ = nullptr;
 };
 
 #endif
