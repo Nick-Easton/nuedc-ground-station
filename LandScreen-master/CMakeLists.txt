@@ -15,12 +15,8 @@ find_package(Qt${QT_VERSION_MAJOR} COMPONENTS
 
 add_executable(planescreen
   main.cpp
-  blink.cpp
-  blink.h
-  landScreen.cpp
-  landScreen.h
-  TargetInfo.cpp
-  TargetInfo.h
+  groundAirMonitor.cpp
+  groundAirMonitor.h
 )
 
 target_link_libraries(planescreen
@@ -28,3 +24,7 @@ target_link_libraries(planescreen
   Qt${QT_VERSION_MAJOR}::Widgets
   Qt${QT_VERSION_MAJOR}::Network
 )
+
+if(MSVC)
+  target_compile_options(planescreen PRIVATE /utf-8)
+endif()

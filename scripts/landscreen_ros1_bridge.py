@@ -30,6 +30,9 @@ class LandScreenRos1Bridge:
         rospy.Subscriber("/vision/summary", String, self.on_vision_summary)
         rospy.Subscriber("/vision/grid_result", String, self.on_grid_result)
         rospy.Subscriber("/planner/path", Path, self.on_path)
+        rospy.Subscriber(
+            "/ground_station/telemetry", String, self.on_ground_air_telemetry
+        )
 
     def serve_forever(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -184,6 +187,21 @@ class LandScreenRos1Bridge:
             rospy.logwarn("Bad vision summary counts: %s", summary)
             return
         self.send_to_ground({"planner": [], "vision_summary": summary})
+
+    def on_ground_air_telemetry(self, msg):
+        """Relay normalized read-only telemetry without issuing any command."""
+        try:
+            telemetry = json.loads(msg.data)
+        except ValueError as exc:
+            rospy.logwarn("Bad ground-air telemetry JSON: %s", exc)
+            return
+        if not isinstance(telemetry, dict):
+            rospy.logwarn("Ground-air telemetry must be a JSON object")
+            return
+        if telemetry.get("type") != "ground_air_telemetry":
+            rospy.logwarn("Unexpected ground-air telemetry type")
+            return
+        self.send_to_ground(telemetry)
 
     def on_forbidden_zones(self, msg):
         forbidden = []

@@ -1,0 +1,29 @@
+<launch>
+  <arg name="host" default="0.0.0.0"/>
+  <arg name="port" default="8001"/>
+  <arg name="car_odometry_topic" default="/lidar/car/odom"/>
+  <arg name="drone_odometry_topic" default="/lidar/drone/odom"/>
+  <arg name="drone_state_topic" default="/drone/state"/>
+  <arg name="mission_state_topic" default="/mission/state"/>
+  <arg name="mission_mode" default="DROP"/>
+  <arg name="publish_rate" default="10.0"/>
+  <arg name="stale_timeout" default="0.6"/>
+
+  <node pkg="nuedc_ground_air" type="ground_air_telemetry_adapter.py"
+        name="ground_air_telemetry_adapter" output="screen">
+    <param name="car_odometry_topic" value="$(arg car_odometry_topic)"/>
+    <param name="drone_odometry_topic" value="$(arg drone_odometry_topic)"/>
+    <param name="drone_state_topic" value="$(arg drone_state_topic)"/>
+    <param name="mission_state_topic" value="$(arg mission_state_topic)"/>
+    <param name="mission_mode" value="$(arg mission_mode)"/>
+    <param name="publish_rate" value="$(arg publish_rate)"/>
+    <param name="stale_timeout" value="$(arg stale_timeout)"/>
+  </node>
+
+  <node pkg="nuedc_ground_air" type="landscreen_ros1_bridge.py"
+        name="landscreen_ros1_bridge" output="screen">
+    <param name="host" value="$(arg host)"/>
+    <param name="port" value="$(arg port)"/>
+    <param name="grid_mode" value="false"/>
+  </node>
+</launch>
